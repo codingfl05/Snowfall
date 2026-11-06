@@ -4,21 +4,27 @@ import SpriteKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var overlayWindow: NSWindow?
-    private var skView: SKView?
-    private var scene: SnowScene?
+    private struct ScreenOverlay {
+        let window: NSWindow
+        let view: SKView
+        let scene: SnowScene
+        let tracker: WindowTracker
+    }
+
+    private var overlays: [ScreenOverlay] = []
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
     private var intensityItems: [NSMenuItem] = []
     private var fpsItems: [NSMenuItem] = []
+    private var currentIntensity: SnowIntensity = .normal
+    private var currentFPS: Int = Config.framesPerSecond
     private var isUserPaused = false
     private var isDisplaySleeping = false
     private var isSessionInactive = false
-    private let tracker = WindowTracker()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        setupOverlay()
+        rebuildOverlays()
         setupStatusItem()
         setupObservers()
     }
@@ -59,52 +65,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
     }
 
-    // MARK: - Overlay window
+    // MARK: - Overlay windows (Multi-display)
 
-    /// 화면 전체를 덮는 투명 창. 클릭은 아래 앱으로 그대로 통과함.
-    private func setupOverlay() {
-        // MVP는 메인 디스플레이(메뉴바가 있는 화면)만 지원
-        guard let screen = NSScreen.screens.first else { return }
-        let frame = screen.frame
+    /// 연결된 모든 디스플레이(NSScreen)마다 투명 오버레이 창과 SnowScene을 생성.
+    /// 모니터 연결/해제/해상도 변경 시(didChangeScreenParametersNotification) 전체 재생성.
+    private func rebuildOverlays() {
+        for overlay in overlays {
+            overlay.view.isPaused = true
+            overlay.view.presentScene(nil)
+            overlay.window.orderOut(nil)
+            overlay.window.close()
+        }
+        overlays.removeAll()
 
-        let window = NSWindow(contentRect: frame, styleMask: [.borderless],
-                              backing: .buffered, defer: false)
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false
-        window.ignoresMouseEvents = true          // click-through
-        window.level = .statusBar                 // 일반 창과 메뉴바 위에 표시
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary,
-                                     .fullScreenAuxiliary, .ignoresCycle]
-        window.isReleasedWhenClosed = false
+        let screens = NSScreen.screens
+        guard let primaryHeight = screens.first?.frame.height else { return }
+        let shouldPause = isUserPaused || isDisplaySleeping || isSessionInactive
 
-        let view = SKView(frame: NSRect(origin: .zero, size: frame.size))
-        view.allowsTransparency = true
-        view.preferredFramesPerSecond = Config.framesPerSecond
-        view.ignoresSiblingOrder = true
-        view.autoresizingMask = [.width, .height]
+        for screen in screens {
+            let frame = screen.frame
 
-        tracker.screenSize = frame.size
-        let scene = SnowScene(size: frame.size)
-        scene.scaleMode = .resizeFill
-        scene.backgroundColor = .clear
-        scene.tracker = tracker
-        view.presentScene(scene)
+            let window = NSWindow(contentRect: frame, styleMask: [.borderless],
+                                  backing: .buffered, defer: false)
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = false
+            window.ignoresMouseEvents = true          // click-through
+            window.level = .statusBar                 // 일반 창과 메뉴바 위에 표시
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary,
+                                         .fullScreenAuxiliary, .ignoresCycle]
+            window.isReleasedWhenClosed = false
 
-        window.contentView = view
-        window.setFrame(frame, display: true)
-        window.orderFrontRegardless()
+            let view = SKView(frame: NSRect(origin: .zero, size: frame.size))
+            view.allowsTransparency = true
+            view.preferredFramesPerSecond = currentFPS
+            view.ignoresSiblingOrder = true
+            view.autoresizingMask = [.width, .height]
 
-        overlayWindow = window
-        skView = view
-        self.scene = scene
+            let tracker = WindowTracker()
+            tracker.screenFrame = frame
+            tracker.primaryScreenHeight = primaryHeight
+
+            let scene = SnowScene(size: frame.size)
+            scene.scaleMode = .resizeFill
+            scene.backgroundColor = .clear
+            scene.intensity = currentIntensity
+            scene.tracker = tracker
+            view.presentScene(scene)
+            view.isPaused = shouldPause
+
+            window.contentView = view
+            window.setFrame(frame, display: true)
+            if !shouldPause {
+                window.orderFrontRegardless()
+            }
+
+            overlays.append(ScreenOverlay(window: window, view: view, scene: scene, tracker: tracker))
+        }
     }
 
     @objc private func screenParametersChanged() {
-        guard let screen = NSScreen.screens.first, let window = overlayWindow else { return }
-        window.setFrame(screen.frame, display: true)
-        tracker.screenSize = screen.frame.size
-        scene?.resetForScreenChange()
+        rebuildOverlays()
     }
 
     // MARK: - Menu bar
@@ -192,15 +213,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func selectIntensity(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let level = SnowIntensity(rawValue: raw) else { return }
-        scene?.intensity = level
+        currentIntensity = level
+        for overlay in overlays {
+            overlay.scene.intensity = level
+        }
         for mi in intensityItems {
             mi.state = (mi.representedObject as? String) == raw ? .on : .off
         }
     }
 
     @objc private func selectFPS(_ sender: NSMenuItem) {
-        guard let fps = sender.representedObject as? Int, let view = skView else { return }
-        view.preferredFramesPerSecond = fps
+        guard let fps = sender.representedObject as? Int else { return }
+        currentFPS = fps
+        for overlay in overlays {
+            overlay.view.preferredFramesPerSecond = fps
+        }
         for mi in fpsItems {
             mi.state = (mi.representedObject as? Int) == fps ? .on : .off
         }
@@ -233,17 +260,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updatePauseState() {
-        guard let view = skView, let window = overlayWindow else { return }
         let shouldPause = isUserPaused || isDisplaySleeping || isSessionInactive
-        view.isPaused = shouldPause
-        if shouldPause {
-            window.orderOut(nil)
-        } else {
-            window.orderFrontRegardless()
+        for overlay in overlays {
+            overlay.view.isPaused = shouldPause
+            if shouldPause {
+                overlay.window.orderOut(nil)
+            } else {
+                overlay.window.orderFrontRegardless()
+            }
         }
     }
 
     @objc private func shakeOffSnow() {
-        scene?.shakeOffAllSnow()
+        for overlay in overlays {
+            overlay.scene.shakeOffAllSnow()
+        }
     }
 }
