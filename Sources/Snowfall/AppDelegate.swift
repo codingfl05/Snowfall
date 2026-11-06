@@ -1,13 +1,15 @@
 import AppKit
+import ServiceManagement
 import SpriteKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var overlayWindow: NSWindow?
     private var skView: SKView?
     private var scene: SnowScene?
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
+    private var launchAtLoginItem: NSMenuItem?
     private var intensityItems: [NSMenuItem] = []
     private var fpsItems: [NSMenuItem] = []
     private var isUserPaused = false
@@ -112,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.title = "❄︎"
 
         let menu = NSMenu()
+        menu.delegate = self
 
         let intensityMenu = NSMenu()
         for level in SnowIntensity.allCases {
@@ -148,6 +151,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shake.target = self
         menu.addItem(shake)
 
+        let launchAtLogin = NSMenuItem(title: "로그인 시 실행", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchAtLogin.target = self
+        launchAtLogin.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
+        menu.addItem(launchAtLogin)
+        launchAtLoginItem = launchAtLogin
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -156,6 +165,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         item.menu = menu
         statusItem = item
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        // 메뉴를 열 때마다 시스템 설정의 로그인 항목 상태와 체크 표시를 동기화
+        launchAtLoginItem?.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        // SMAppService.mainApp: macOS 13+에서 현재 .app 번들을 로그인 항목에 등록/해제하는 API
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+            } else {
+                try service.register()
+            }
+        } catch {
+            if Config.debugLogging {
+                print("[Snowfall] Launch at login error: \(error)")
+            }
+        }
+        launchAtLoginItem?.state = (service.status == .enabled) ? .on : .off
     }
 
     @objc private func selectIntensity(_ sender: NSMenuItem) {
