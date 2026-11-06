@@ -56,6 +56,19 @@ enum Config {
     static let iconEdgeInset: CGFloat = 4                            // 아이콘 양 끝 여백 (pt)
     static let maxIconPileHeight: CGFloat = 10                       // 아이콘 위에 쌓이는 최대 눈 높이 (pt)
 
+    // MARK: - Snowman (눈사람)
+    static let snowmanFirstDelay: TimeInterval = 8.0                 // 앱 실행 후 첫 눈사람 등장 시간 (초)
+    static let snowmanIntervalRange: ClosedRange<TimeInterval> = 35.0...65.0 // 다음 눈사람 등장 간격 (초)
+    static let snowmanRollDuration: TimeInterval = 2.2               // 눈덩이가 굴러오는 시간 (초)
+    static let snowmanRollDistance: CGFloat = 105                    // 눈덩이가 굴러오는 거리 (pt)
+    static let snowmanStackDuration: TimeInterval = 0.7              // 머리 눈덩이가 위로 올라가는 시간 (초)
+    static let snowmanWaveDuration: TimeInterval = 6.0               // 목도리를 두르고 손을 흔드는 시간 (초)
+    static let snowmanWaveSpeed: CGFloat = 7.5                       // 손 흔드는 속도 (rad/s)
+    static let snowmanMeltDuration: TimeInterval = 3.0               // 눈사람이 녹아 사라지는 시간 (초)
+    static let snowmanBodyRadius: CGFloat = 14                       // 몸통 눈덩이 반지름 (pt)
+    static let snowmanHeadRadius: CGFloat = 9.5                      // 머리 눈덩이 반지름 (pt)
+    static let snowmanDefaultDockHeight: CGFloat = 76                // Dock 감지 전 기본 Dock 높이 (pt)
+
     // MARK: - Debug
     /// 터미널에서 `SNOW_DEBUG=1 swift run -c release` 로 실행하면 감지된 창 수 등을 출력
     static let debugLogging = ProcessInfo.processInfo.environment["SNOW_DEBUG"] != nil

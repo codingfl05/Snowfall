@@ -18,6 +18,8 @@ final class SnowScene: SKScene {
     private var spawnCarry: Double = 0
     private var lastDebugLog: TimeInterval = 0
     private var didPrefill = false
+    private var snowman: Snowman?
+    private var nextSnowmanTime: TimeInterval = Config.snowmanFirstDelay
 
     override func didMove(to view: SKView) {
         backgroundColor = .clear
@@ -53,15 +55,30 @@ final class SnowScene: SKScene {
             pile.stepIcicles(dt: dt)
             if pile.iciclesDirty { pile.redrawIcicles() }
         }
+
+        stepSnowman(dt: dt)
     }
 
     // MARK: - Public controls
 
-    /// 메뉴의 "쌓인 눈 털기": 모든 창의 눈과 고드름을 떨어뜨림
+    /// 메뉴의 "쌓인 눈 털기": 모든 창의 눈과 고드름, 눈사람을 떨어뜨림
     func shakeOffAllSnow() {
         for pile in pileOrder {
             dumpSnow(from: pile)
             dumpIcicles(from: pile)
+        }
+        if let current = snowman {
+            for _ in 0..<24 {
+                spawnDebris(
+                    x: current.targetX + CGFloat.random(in: -14...14),
+                    y: current.groundY + CGFloat.random(in: 2...34),
+                    vx: CGFloat.random(in: -35...35),
+                    vy: CGFloat.random(in: -20...30)
+                )
+            }
+            current.rootNode.removeFromParent()
+            snowman = nil
+            nextSnowmanTime = clock + TimeInterval.random(in: Config.snowmanIntervalRange)
         }
     }
 
@@ -70,6 +87,8 @@ final class SnowScene: SKScene {
         for pile in piles.values { pile.node.removeFromParent() }
         piles.removeAll()
         pileOrder.removeAll()
+        snowman?.rootNode.removeFromParent()
+        snowman = nil
         recycleAllFlakes()
         prefillSky()
     }
@@ -322,6 +341,51 @@ final class SnowScene: SKScene {
                             vx: CGFloat.random(in: 4...16), vy: 0)
             }
         }
+    }
+
+    // MARK: - Snowman
+
+    /// 주기적으로 Dock 영역 위에 눈덩이가 굴러와 눈사람이 되었다가 손을 흔들고 녹아 사라짐
+    private func stepSnowman(dt: TimeInterval) {
+        if let current = snowman {
+            current.step(dt: dt)
+            if current.isFinished {
+                snowman = nil
+                nextSnowmanTime = clock + TimeInterval.random(in: Config.snowmanIntervalRange)
+            }
+            return
+        }
+
+        guard clock >= nextSnowmanTime, size.width > 300 else { return }
+
+        let dockPiles = pileOrder.filter { $0.kind == .dockItem }
+        let targetX: CGFloat
+        let groundY: CGFloat
+
+        if let chosen = dockPiles.randomElement() {
+            // Accessibility로 감지된 Dock 아이템 위
+            let margin = Config.snowmanRollDistance + 24
+            targetX = min(max(chosen.frame.midX, margin), size.width - margin)
+            groundY = chosen.base
+        } else if tracker?.screenFrame.origin == .zero {
+            // 권한이 없거나 Dock 아이템이 없을 때는 메인 화면의 Dock 영역 높이를 사용
+            let margin = Config.snowmanRollDistance + 24
+            let minX = max(margin, size.width * 0.28)
+            let maxX = min(size.width - margin, size.width * 0.72)
+            guard maxX > minX else { return }
+            targetX = CGFloat.random(in: minX...maxX)
+
+            let screenDockInset = NSScreen.screens.first.map { $0.visibleFrame.minY - $0.frame.minY } ?? 0
+            groundY = screenDockInset > 16 ? screenDockInset : Config.snowmanDefaultDockHeight
+        } else {
+            // Dock이 없는 보조 모니터에서는 생성하지 않음
+            nextSnowmanTime = clock + 10
+            return
+        }
+
+        let created = Snowman(targetX: targetX, groundY: groundY)
+        addChild(created.rootNode)
+        snowman = created
     }
 
     // MARK: - Texture
