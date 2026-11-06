@@ -49,6 +49,13 @@ enum Config {
     static let icicleGrowthSpeedRange: ClosedRange<CGFloat> = 2.0...4.5 // 초당 자라는 속도 (pt/s)
     static let icicleStaggerRange: ClosedRange<TimeInterval> = 0...2.5  // 고드름마다 자라기 시작하는 시간차 (초)
 
+    // MARK: - Dock & Desktop icons (Accessibility)
+    static let axPollInterval: TimeInterval = 0.25                   // Dock/바탕화면 아이콘 위치 갱신 주기 (4 Hz)
+    static let minIconSize = CGSize(width: 24, height: 24)
+    static let maxIconSize = CGSize(width: 220, height: 220)
+    static let iconEdgeInset: CGFloat = 4                            // 아이콘 양 끝 여백 (pt)
+    static let maxIconPileHeight: CGFloat = 10                       // 아이콘 위에 쌓이는 최대 눈 높이 (pt)
+
     // MARK: - Debug
     /// 터미널에서 `SNOW_DEBUG=1 swift run -c release` 로 실행하면 감지된 창 수 등을 출력
     static let debugLogging = ProcessInfo.processInfo.environment["SNOW_DEBUG"] != nil

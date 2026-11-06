@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isSessionInactive = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AccessibilityTracker.shared.requestPermissionOnce()
         rebuildOverlays()
         setupStatusItem()
         setupObservers()

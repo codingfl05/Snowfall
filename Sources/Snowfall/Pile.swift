@@ -17,6 +17,7 @@ struct Icicle {
 @MainActor
 final class Pile {
     let windowID: CGWindowID
+    let kind: SurfaceKind
     private(set) var frame: CGRect = .zero
     private(set) var originX: CGFloat = 0
     private(set) var heights: [CGFloat] = []
@@ -34,8 +35,9 @@ final class Pile {
     let node = SKShapeNode()
     let icicleNode = SKShapeNode()
 
-    init(windowID: CGWindowID, frame: CGRect) {
+    init(windowID: CGWindowID, frame: CGRect, kind: SurfaceKind = .window) {
         self.windowID = windowID
+        self.kind = kind
         node.fillColor = NSColor(white: 1.0, alpha: 0.97)
         // 흰 창(light mode) 위에서도 보이도록 옅은 회청색 테두리
         node.strokeColor = NSColor(calibratedRed: 0.70, green: 0.76, blue: 0.86, alpha: 0.9)
@@ -95,7 +97,8 @@ final class Pile {
 
     func reset(frame newFrame: CGRect) {
         frame = newFrame
-        let usable = max(0, newFrame.width - Config.pileEdgeInset * 2)
+        let inset = (kind == .window) ? Config.pileEdgeInset : Config.iconEdgeInset
+        let usable = max(0, newFrame.width - inset * 2)
         let count = Int(usable / Config.columnWidth)
         originX = newFrame.midX - CGFloat(count) * Config.columnWidth / 2
         heights = Array(repeating: 0, count: count)
@@ -115,11 +118,12 @@ final class Pile {
         isDirty = true
     }
 
-    /// 창 폭에 비례하는 개수로 고드름 위치를 무작위 배치하고 타이머를 0으로 초기화
+    /// 창 폭에 비례하는 개수로 고드름 위치를 무작위 배치하고 타이머를 0으로 초기화 (일반 창에만 생성)
     func seedIcicles() {
         stillTime = 0
         icicles.removeAll()
         iciclesDirty = true
+        guard kind == .window else { return }
 
         let minX = frame.minX + Config.icicleEdgeInset
         let maxX = frame.maxX - Config.icicleEdgeInset
@@ -174,7 +178,7 @@ final class Pile {
 
     /// 눈송이 하나가 c번째 칸에 착지. 주변 칸에도 조금씩 나눠 쌓음.
     func add(at c: Int, amount: CGFloat) {
-        let cap = Config.maxPileHeight
+        let cap = (kind == .window) ? Config.maxPileHeight : Config.maxIconPileHeight
         heights[c] = min(cap, heights[c] + amount * 0.5)
         if c > 0 { heights[c - 1] = min(cap, heights[c - 1] + amount * 0.25) }
         if c + 1 < heights.count { heights[c + 1] = min(cap, heights[c + 1] + amount * 0.25) }

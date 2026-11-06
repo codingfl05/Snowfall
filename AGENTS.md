@@ -14,9 +14,10 @@ Personal use only, never distributed. Owner is a Swift beginner: keep changes sm
 - main.swift — entry point, accessory activation policy (no Dock icon).
 - AppDelegate.swift — transparent click-through overlay NSWindow + SKView + SnowScene per NSScreen (level .statusBar, rebuilt on screen changes), NSStatusItem menu.
 - SnowScene.swift — SpriteKit scene: main loop, flake spawn/step/landing, window polling (20 Hz), snow/icicle debris.
-- Pile.swift — per-window snow heightmap (columns), slope relaxation, bottom-edge icicles (`Icicle`), occlusion mask, SKShapeNode drawing.
+- Pile.swift — per-surface snow heightmap (columns), slope relaxation, bottom-edge icicles (`Icicle`, windows only), occlusion mask, SKShapeNode drawing.
 - Flake.swift — pooled flake (SKSpriteNode). Never allocate flakes per frame; use obtainFlake/recycle.
-- WindowTracker.swift — CGWindowListCopyWindowInfo → layer-0 windows, front-to-back, converted to per-screen scene coords.
+- WindowTracker.swift — combines Dock items, CGWindowList layer-0 windows, and Finder desktop icons front-to-back, converted to per-screen scene coords.
+- AccessibilityTracker.swift — uses `AXUIElement` (`AXIsProcessTrustedWithOptions` once at launch) to read Dock item frames and Finder desktop icon frames (4 Hz cached); falls back gracefully to windows-only if denied.
 - Config.swift — ALL tunables. Prefer changing values here over changing logic.
 
 ## Coordinate rules (important)
@@ -29,17 +30,18 @@ Personal use only, never distributed. Owner is a Swift beginner: keep changes sm
 ## Behavior rules
 - Window moved / width changed / closed / minimized → its pile is dumped as debris flakes.
 - Snow lands and draws only on columns whose top edge is not covered by a window in front.
-- No permissions in the MVP: only window bounds are read, never titles or contents.
+- Accessibility permission (`AXIsProcessTrustedWithOptions`) is requested once on launch for Dock & Finder desktop icon frames; if denied, the app continues working with windows only without crashing or repeating prompts.
 - AppKit/SpriteKit-touching classes are main-actor.
 - Energy saving: Default 30 FPS (configurable to 60 via menu). Rendering and window polling automatically pause when display sleeps or user session becomes inactive (NSWorkspace notifications), resuming on wake/active.
 - Launch at login: Menu toggle "로그인 시 실행" uses `SMAppService.mainApp` (requires `.app` bundle with `CFBundleIdentifier = com.codingfl05.snowfall` and `LSUIElement = true`).
 - Multi-display: Creates one overlay window and `SnowScene` per `NSScreen`, rebuilding all overlays on `NSApplication.didChangeScreenParametersNotification`.
 - Icicles: After a window remains still for `Config.icicleStartDelay` seconds, icicles grow downward from its bottom edge (count scales with window width, hidden where covered by front windows) and snap off into falling debris when the window moves or closes.
+- Dock & desktop icons: Treated as `Pile` surfaces (`SurfaceKind.dockItem` in front of windows, `SurfaceKind.desktopIcon` behind windows so windows occlude desktop icons).
 
 ## Roadmap
 1. [x] Step 1 - Energy saving (30/60 FPS menu, pause on display sleep / session resign active)
 2. [x] Step 2 - .app bundle + launch at login (SMAppService)
 3. [x] Step 3 - Multi-display: one overlay per NSScreen
 4. [x] Step 4 - Icicles under windows left alone
-5. Step 5 - Snow on Dock and desktop icons (Accessibility API, needs permission)
+5. [x] Step 5 - Snow on Dock and desktop icons (Accessibility API, needs permission)
 6. Step 6 - Snowman

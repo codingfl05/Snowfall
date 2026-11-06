@@ -100,7 +100,7 @@ final class SnowScene: SKScene {
                 }
                 order.append(pile)
             } else {
-                let pile = Pile(windowID: w.id, frame: w.frame)
+                let pile = Pile(windowID: w.id, frame: w.frame, kind: w.kind)
                 addChild(pile.node)
                 piles[w.id] = pile
                 order.append(pile)
