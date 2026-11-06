@@ -33,17 +33,27 @@ final class Pile {
     private(set) var iciclesDirty = true
 
     let node = SKShapeNode()
+    let shadowNode = SKShapeNode()
     let icicleNode = SKShapeNode()
 
     init(windowID: CGWindowID, frame: CGRect, kind: SurfaceKind = .window) {
         self.windowID = windowID
         self.kind = kind
         node.fillColor = NSColor(white: 1.0, alpha: 0.97)
-        // 흰 창(light mode) 위에서도 보이도록 옅은 회청색 테두리
-        node.strokeColor = NSColor(calibratedRed: 0.70, green: 0.76, blue: 0.86, alpha: 0.9)
-        node.lineWidth = 0.8
+        // 흰 창(light mode)이나 노란 폴더 위에서도 입체적으로 보이도록 은은한 빙하빛 테두리
+        node.strokeColor = NSColor(calibratedRed: 0.66, green: 0.75, blue: 0.88, alpha: 0.92)
+        node.lineWidth = 0.9
+        node.lineJoin = .round
         node.isAntialiased = true
         node.zPosition = 5
+
+        // 눈더미 아랫부분의 부드러운 그림자
+        shadowNode.fillColor = .clear
+        shadowNode.strokeColor = NSColor(calibratedRed: 0.35, green: 0.45, blue: 0.62, alpha: 0.28)
+        shadowNode.lineWidth = 1.6
+        shadowNode.lineCap = .round
+        shadowNode.zPosition = -1
+        node.addChild(shadowNode)
 
         // 고드름은 살짝 반투명한 얼음빛(하늘빛 흰색)으로 표현
         icicleNode.fillColor = NSColor(calibratedRed: 0.88, green: 0.95, blue: 1.0, alpha: 0.90)
@@ -57,8 +67,17 @@ final class Pile {
 
     // MARK: - Geometry
 
-    /// 눈이 놓이는 기준선 (창 윗변보다 살짝 아래 → 얹혀 있는 느낌)
-    var base: CGFloat { frame.maxY - 0.5 }
+    /// 눈이 놓이는 기준선 (바탕화면 폴더 아이콘은 상단 빈 셀 여백만큼 내려서 실제 폴더 윗변에 밀착)
+    var base: CGFloat {
+        switch kind {
+        case .window:
+            return frame.maxY - 0.5
+        case .dockItem:
+            return frame.maxY - 2.0
+        case .desktopIcon:
+            return frame.maxY - Config.desktopIconTopOffset
+        }
+    }
     /// 고드름이 매달리는 기준선 (창 아랫변보다 살짝 위 → 창 밑에 붙어 있는 느낌)
     var bottomBase: CGFloat { frame.minY + 0.5 }
     var endX: CGFloat { originX + CGFloat(heights.count) * Config.columnWidth }
@@ -97,7 +116,12 @@ final class Pile {
 
     func reset(frame newFrame: CGRect) {
         frame = newFrame
-        let inset = (kind == .window) ? Config.pileEdgeInset : Config.iconEdgeInset
+        let inset: CGFloat
+        switch kind {
+        case .window: inset = Config.pileEdgeInset
+        case .dockItem: inset = Config.iconEdgeInset
+        case .desktopIcon: inset = Config.desktopIconEdgeInset
+        }
         let usable = max(0, newFrame.width - inset * 2)
         let count = Int(usable / Config.columnWidth)
         originX = newFrame.midX - CGFloat(count) * Config.columnWidth / 2
@@ -176,12 +200,30 @@ final class Pile {
         if grew { iciclesDirty = true }
     }
 
+    /// 양 끝으로 갈수록 최대 높이가 둥글게 낮아지는 아치형(dome) 한계값 계산 (네모난 벽돌 모양 방지)
+    private func columnCap(at c: Int) -> CGFloat {
+        let baseCap = (kind == .window) ? Config.maxPileHeight : Config.maxIconPileHeight
+        let n = heights.count
+        guard n > 2 else { return baseCap * 0.6 }
+        let distFromEdge = min(c, n - 1 - c)
+        let taperCols = max(2, min(Config.pileTaperColumns, n / 2))
+        if distFromEdge < taperCols {
+            let ratio = CGFloat(distFromEdge + 1) / CGFloat(taperCols + 1)
+            let arch = sin(ratio * .pi * 0.5)
+            return baseCap * (0.22 + 0.78 * arch)
+        }
+        return baseCap
+    }
+
     /// 눈송이 하나가 c번째 칸에 착지. 주변 칸에도 조금씩 나눠 쌓음.
     func add(at c: Int, amount: CGFloat) {
-        let cap = (kind == .window) ? Config.maxPileHeight : Config.maxIconPileHeight
-        heights[c] = min(cap, heights[c] + amount * 0.5)
-        if c > 0 { heights[c - 1] = min(cap, heights[c - 1] + amount * 0.25) }
-        if c + 1 < heights.count { heights[c + 1] = min(cap, heights[c + 1] + amount * 0.25) }
+        heights[c] = min(columnCap(at: c), heights[c] + amount * 0.5)
+        if c > 0 {
+            heights[c - 1] = min(columnCap(at: c - 1), heights[c - 1] + amount * 0.25)
+        }
+        if c + 1 < heights.count {
+            heights[c + 1] = min(columnCap(at: c + 1), heights[c + 1] + amount * 0.25)
+        }
         needsRelax = true
         isDirty = true
     }
@@ -217,7 +259,17 @@ final class Pile {
             anyChange = true
         }
 
-        if anyChange { isDirty = true } else { needsRelax = false }
+        if anyChange {
+            for idx in 0..<n {
+                let cap = columnCap(at: idx)
+                if heights[idx] > cap {
+                    heights[idx] = cap
+                }
+            }
+            isDirty = true
+        } else {
+            needsRelax = false
+        }
     }
 
     /// 앞에 있는 창들(occluders)이 이 창의 윗변/아랫변을 덮고 있는 영역은 숨김.
@@ -263,6 +315,7 @@ final class Pile {
     func redraw() {
         isDirty = false
         let path = CGMutablePath()
+        let shadowPath = CGMutablePath()
         let cw = Config.columnWidth
         let n = heights.count
         var c = 0
@@ -273,11 +326,13 @@ final class Pile {
             while c < n, visible[c], heights[c] > 0.05 { c += 1 }
             let end = c - 1
 
-            var pts: [CGPoint] = [CGPoint(x: originX + CGFloat(start) * cw, y: base)]
+            let leftX = originX + CGFloat(start) * cw
+            let rightX = originX + CGFloat(end + 1) * cw
+            var pts: [CGPoint] = [CGPoint(x: leftX, y: base)]
             for i in start...end {
                 pts.append(CGPoint(x: columnCenterX(i), y: base + heights[i]))
             }
-            pts.append(CGPoint(x: originX + CGFloat(end + 1) * cw, y: base))
+            pts.append(CGPoint(x: rightX, y: base))
 
             // 점들 사이 중간점을 quad curve로 이어 각진 느낌 제거
             path.move(to: pts[0])
@@ -288,8 +343,13 @@ final class Pile {
             }
             path.addLine(to: pts[pts.count - 1])
             path.closeSubpath()
+
+            // 아랫부분 접촉면에 은은한 입체 그림자 선 추가
+            shadowPath.move(to: CGPoint(x: leftX + 1, y: base - 0.5))
+            shadowPath.addLine(to: CGPoint(x: rightX - 1, y: base - 0.5))
         }
         node.path = path
+        shadowNode.path = shadowPath
     }
 
     /// 아랫변이 가려지지 않은 위치의 고드름들을 뾰족한 얼음 기둥 모양으로 그림.

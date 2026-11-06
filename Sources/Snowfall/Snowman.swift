@@ -47,6 +47,13 @@ final class Snowman {
         scarfTailNode.strokeColor = NSColor(calibratedRed: 0.65, green: 0.10, blue: 0.14, alpha: 1.0)
         scarfTailNode.lineWidth = 0.7
 
+        // 바닥 그림자 (밝은 배경/Dock 위에서도 눈사람이 뚜렷하게 보이도록 함)
+        let shadowOval = SKShapeNode(ellipseOf: CGSize(width: rBody * 2.1, height: 5.5))
+        shadowOval.fillColor = NSColor(calibratedRed: 0.20, green: 0.30, blue: 0.45, alpha: 0.32)
+        shadowOval.strokeColor = .clear
+        shadowOval.position = CGPoint(x: 0, y: 1)
+        rootNode.addChild(shadowOval)
+
         rootNode.addChild(bodyNode)
         rootNode.addChild(headNode)
         rootNode.addChild(detailsNode)
@@ -54,6 +61,16 @@ final class Snowman {
         buildDetails()
         detailsNode.alpha = 0
         updateRolling(progress: 0)
+    }
+
+    /// 설정에서 눈사람을 끄거나 씬이 정리될 때 노드 트리를 즉시 해제하여 메모리를 반환
+    func destroy() {
+        detailsNode.removeAllChildren()
+        bodyNode.removeAllChildren()
+        headNode.removeAllChildren()
+        rootNode.removeAllChildren()
+        rootNode.removeFromParent()
+        isFinished = true
     }
 
     // MARK: - Frame update
@@ -95,9 +112,8 @@ final class Snowman {
             let p = min(1.0, CGFloat(next / Config.snowmanMeltDuration))
             updateMelting(progress: p)
             if next >= Config.snowmanMeltDuration {
-                rootNode.removeFromParent()
+                destroy()
                 phase = .finished
-                isFinished = true
             } else {
                 phase = .melting(next)
             }

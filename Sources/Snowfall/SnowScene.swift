@@ -6,6 +6,15 @@ import AppKit
 final class SnowScene: SKScene {
     var tracker: WindowTracker?
     var intensity: SnowIntensity = .normal
+    var isSnowmanEnabled: Bool = Config.defaultSnowmanEnabled {
+        didSet {
+            if !isSnowmanEnabled {
+                removeSnowmanImmediately()
+            } else if !oldValue {
+                nextSnowmanTime = clock + 2.0
+            }
+        }
+    }
 
     private var flakeTexture: SKTexture?
     private var active: [Flake] = []
@@ -76,7 +85,7 @@ final class SnowScene: SKScene {
                     vy: CGFloat.random(in: -20...30)
                 )
             }
-            current.rootNode.removeFromParent()
+            current.destroy()
             snowman = nil
             nextSnowmanTime = clock + TimeInterval.random(in: Config.snowmanIntervalRange)
         }
@@ -87,10 +96,15 @@ final class SnowScene: SKScene {
         for pile in piles.values { pile.node.removeFromParent() }
         piles.removeAll()
         pileOrder.removeAll()
-        snowman?.rootNode.removeFromParent()
-        snowman = nil
+        removeSnowmanImmediately()
         recycleAllFlakes()
         prefillSky()
+    }
+
+    /// 눈사람 노드와 참조를 즉시 해제하여 메모리 반환
+    private func removeSnowmanImmediately() {
+        snowman?.destroy()
+        snowman = nil
     }
 
     // MARK: - Windows
@@ -200,6 +214,8 @@ final class SnowScene: SKScene {
     private func spawnFlake(atY y: CGFloat?) {
         guard let f = obtainFlake() else { return }
         let r = CGFloat.random(in: Config.flakeRadiusRange)
+        let depthSpan = max(0.1, Config.flakeRadiusRange.upperBound - Config.flakeRadiusRange.lowerBound)
+        let depth = (r - Config.flakeRadiusRange.lowerBound) / depthSpan
         f.setRadius(r)
         f.x = CGFloat.random(in: -30...(size.width + 10))
         f.y = y ?? (size.height + r * 2 + CGFloat.random(in: 0...20))
@@ -207,12 +223,15 @@ final class SnowScene: SKScene {
         f.vy = -f.terminalSpeed
         f.vx = 0
         f.acceleration = 4
-        f.swayScale = CGFloat.random(in: 0.5...1.0)
+        f.swayScale = 0.45 + 0.55 * depth
         f.swayFrequency = CGFloat.random(in: Config.swayFrequencyRange)
         f.phase = CGFloat.random(in: 0...(2 * .pi))
         f.mass = 1
         f.landDelay = 0
-        f.node.alpha = CGFloat.random(in: Config.flakeAlphaRange)
+        // 작은 눈송이는 멀리 있는 것처럼 은은하게, 큰 눈송이는 선명하게 표현 (원근감)
+        let minA = Config.flakeAlphaRange.lowerBound
+        let maxA = Config.flakeAlphaRange.upperBound
+        f.node.alpha = min(maxA, max(minA, minA + (maxA - minA) * (0.25 + 0.75 * depth) + CGFloat.random(in: -0.08...0.08)))
         f.node.position = CGPoint(x: f.x, y: f.y)
     }
 
@@ -347,6 +366,8 @@ final class SnowScene: SKScene {
 
     /// 주기적으로 Dock 영역 위에 눈덩이가 굴러와 눈사람이 되었다가 손을 흔들고 녹아 사라짐
     private func stepSnowman(dt: TimeInterval) {
+        guard isSnowmanEnabled else { return }
+
         if let current = snowman {
             current.step(dt: dt)
             if current.isFinished {

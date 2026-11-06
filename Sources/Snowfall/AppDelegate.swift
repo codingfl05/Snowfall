@@ -14,11 +14,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var overlays: [ScreenOverlay] = []
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
+    private var snowmanItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
     private var intensityItems: [NSMenuItem] = []
     private var fpsItems: [NSMenuItem] = []
     private var currentIntensity: SnowIntensity = .normal
     private var currentFPS: Int = Config.framesPerSecond
+    private var isSnowmanEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: "snowmanEnabled") != nil {
+            return UserDefaults.standard.bool(forKey: "snowmanEnabled")
+        }
+        return Config.defaultSnowmanEnabled
+    }()
     private var isUserPaused = false
     private var isDisplaySleeping = false
     private var isSessionInactive = false
@@ -111,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             scene.scaleMode = .resizeFill
             scene.backgroundColor = .clear
             scene.intensity = currentIntensity
+            scene.isSnowmanEnabled = isSnowmanEnabled
             scene.tracker = tracker
             view.presentScene(scene)
             view.isPaused = shouldPause
@@ -173,6 +181,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         shake.target = self
         menu.addItem(shake)
 
+        let snowmanToggle = NSMenuItem(title: "눈사람 표시", action: #selector(toggleSnowman), keyEquivalent: "")
+        snowmanToggle.target = self
+        snowmanToggle.state = isSnowmanEnabled ? .on : .off
+        menu.addItem(snowmanToggle)
+        snowmanItem = snowmanToggle
+
         let launchAtLogin = NSMenuItem(title: "로그인 시 실행", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLogin.target = self
         launchAtLogin.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
@@ -192,6 +206,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         // 메뉴를 열 때마다 시스템 설정의 로그인 항목 상태와 체크 표시를 동기화
         launchAtLoginItem?.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
+    }
+
+    @objc private func toggleSnowman() {
+        isSnowmanEnabled.toggle()
+        UserDefaults.standard.set(isSnowmanEnabled, forKey: "snowmanEnabled")
+        snowmanItem?.state = isSnowmanEnabled ? .on : .off
+        for overlay in overlays {
+            overlay.scene.isSnowmanEnabled = isSnowmanEnabled
+        }
     }
 
     @objc private func toggleLaunchAtLogin() {

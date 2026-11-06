@@ -31,6 +31,7 @@ final class WindowTracker {
         }
 
         // 2. 일반 앱 창 (layer 0, 앞에서 뒤 순서)
+        let excludedOwners: Set<String> = ["WindowManager", "Dock", "Control Center", "Notification Center"]
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         if let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] {
             for info in list {
@@ -41,6 +42,11 @@ final class WindowTracker {
                       let cgRect = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
                 else { continue }
 
+                if let owner = info[kCGWindowOwnerName as String] as? String,
+                   excludedOwners.contains(owner) {
+                    continue
+                }
+
                 let alpha = info[kCGWindowAlpha as String] as? Double ?? 1
                 guard alpha > 0.01,
                       cgRect.width >= Config.minWindowSize.width,
@@ -48,6 +54,10 @@ final class WindowTracker {
                 else { continue }
 
                 let frame = toSceneFrame(cgRect)
+                // 왼쪽 스테이지 매니저 썸네일 영역에 걸친 작은 프리뷰 창은 제외
+                if frame.minX < Config.stageManagerStripWidth && frame.width < 260 {
+                    continue
+                }
                 guard frame.intersects(screenRect) else { continue }
                 result.append(TrackedWindow(id: id, frame: frame, kind: .window))
             }

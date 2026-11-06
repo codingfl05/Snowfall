@@ -37,8 +37,8 @@ Personal use only, never distributed. Owner is a Swift beginner: keep changes sm
 - Launch at login: Menu toggle "로그인 시 실행" uses `SMAppService.mainApp` (requires `.app` bundle with `CFBundleIdentifier = com.codingfl05.snowfall` and `LSUIElement = true`).
 - Multi-display: Creates one overlay window and `SnowScene` per `NSScreen`, rebuilding all overlays on `NSApplication.didChangeScreenParametersNotification`.
 - Icicles: After a window remains still for `Config.icicleStartDelay` seconds, icicles grow downward from its bottom edge (count scales with window width, hidden where covered by front windows) and snap off into falling debris when the window moves or closes.
-- Dock & desktop icons: Treated as `Pile` surfaces (`SurfaceKind.dockItem` in front of windows, `SurfaceKind.desktopIcon` behind windows so windows occlude desktop icons).
-- Snowman: Periodically (`Config.snowmanFirstDelay` then `Config.snowmanIntervalRange`), two snowballs roll onto the Dock area, stack into a snowman with a red scarf and carrot nose, wave, and melt away.
+- Dock & desktop icons: Treated as `Pile` surfaces (`SurfaceKind.dockItem` in front of windows, `SurfaceKind.desktopIcon` behind windows so windows occlude desktop icons, with top-offset and dome taper so snow sits naturally on folder icons). Stage Manager strip thumbnails and system overlay windows (`WindowManager`, `Dock`, `Control Center`) are excluded from window tracking.
+- Snowman: Periodically (`Config.snowmanFirstDelay` then `Config.snowmanIntervalRange`), two snowballs roll onto the Dock area, stack into a snowman with a red scarf and carrot nose, wave, and melt away. Can be toggled on/off via the "눈사람 표시" menu item (persisted in `UserDefaults`, immediately destroying and deallocating nodes when turned off).
 
 ## Roadmap
 1. [x] Step 1 - Energy saving (30/60 FPS menu, pause on display sleep / session resign active)
