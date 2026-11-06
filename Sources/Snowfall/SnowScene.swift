@@ -49,14 +49,20 @@ final class SnowScene: SKScene {
             pile.relax()
             emitSpill(from: pile)
             if pile.isDirty { pile.redraw() }
+
+            pile.stepIcicles(dt: dt)
+            if pile.iciclesDirty { pile.redrawIcicles() }
         }
     }
 
     // MARK: - Public controls
 
-    /// 메뉴의 "쌓인 눈 털기": 모든 창의 눈을 떨어뜨림
+    /// 메뉴의 "쌓인 눈 털기": 모든 창의 눈과 고드름을 떨어뜨림
     func shakeOffAllSnow() {
-        for pile in pileOrder { dumpSnow(from: pile) }
+        for pile in pileOrder {
+            dumpSnow(from: pile)
+            dumpIcicles(from: pile)
+        }
     }
 
     /// 해상도/디스플레이 구성이 바뀌었을 때 전부 초기화
@@ -81,11 +87,16 @@ final class SnowScene: SKScene {
             seen.insert(w.id)
             if let pile = piles[w.id] {
                 if pile.hasMoved(to: w.frame) {
-                    // 창을 움직이면 쌓인 눈이 미끄러져 떨어짐
+                    // 창을 움직이면 쌓인 눈과 고드름이 미끄러져/부러져 떨어짐
                     dumpSnow(from: pile)
+                    dumpIcicles(from: pile)
                     pile.reset(frame: w.frame)
+                } else if pile.hasBottomMoved(to: w.frame) {
+                    // 아랫변만 움직인 경우 (창 아래쪽 크기 조절) → 고드름만 부러져 떨어짐
+                    dumpIcicles(from: pile)
+                    pile.updateFrame(w.frame, resetIcicles: true)
                 } else {
-                    pile.updateFrame(w.frame)
+                    pile.updateFrame(w.frame, resetIcicles: false)
                 }
                 order.append(pile)
             } else {
@@ -96,9 +107,10 @@ final class SnowScene: SKScene {
             }
         }
 
-        // 닫히거나 최소화된 창 → 눈이 전부 떨어짐
+        // 닫히거나 최소화된 창 → 눈과 고드름이 전부 떨어짐
         for (id, pile) in piles where !seen.contains(id) {
             dumpSnow(from: pile)
+            dumpIcicles(from: pile)
             pile.node.removeFromParent()
             piles[id] = nil
         }
@@ -272,6 +284,24 @@ final class SnowScene: SKScene {
             c += 2   // 모든 칸이 아니라 한 칸 건너 생성 (개수 절약)
         }
         pile.clear()
+    }
+
+    /// 창을 움직이거나 닫을 때 아랫변의 고드름이 부러져 debris처럼 떨어짐
+    private func dumpIcicles(from pile: Pile) {
+        let topY = pile.bottomBase
+        for icicle in pile.icicles where icicle.isVisible && icicle.length > 1.5 {
+            let pieces = max(1, Int(icicle.length / 6))
+            for _ in 0..<pieces {
+                spawnDebris(
+                    x: icicle.x + CGFloat.random(in: -1.5...1.5),
+                    y: topY - CGFloat.random(in: 0...icicle.length),
+                    vx: CGFloat.random(in: -22...22),
+                    vy: CGFloat.random(in: -40 ... -5)
+                )
+            }
+        }
+        pile.seedIcicles()
+        pile.redrawIcicles()
     }
 
     /// 양 끝으로 흘러넘친 눈을 작은 눈송이로 떨어뜨림

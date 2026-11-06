@@ -13,8 +13,8 @@ Personal use only, never distributed. Owner is a Swift beginner: keep changes sm
 ## Files (Sources/Snowfall)
 - main.swift — entry point, accessory activation policy (no Dock icon).
 - AppDelegate.swift — transparent click-through overlay NSWindow + SKView + SnowScene per NSScreen (level .statusBar, rebuilt on screen changes), NSStatusItem menu.
-- SnowScene.swift — SpriteKit scene: main loop, flake spawn/step/landing, window polling (20 Hz), debris.
-- Pile.swift — per-window snow heightmap (columns), slope relaxation, occlusion mask, SKShapeNode drawing.
+- SnowScene.swift — SpriteKit scene: main loop, flake spawn/step/landing, window polling (20 Hz), snow/icicle debris.
+- Pile.swift — per-window snow heightmap (columns), slope relaxation, bottom-edge icicles (`Icicle`), occlusion mask, SKShapeNode drawing.
 - Flake.swift — pooled flake (SKSpriteNode). Never allocate flakes per frame; use obtainFlake/recycle.
 - WindowTracker.swift — CGWindowListCopyWindowInfo → layer-0 windows, front-to-back, converted to per-screen scene coords.
 - Config.swift — ALL tunables. Prefer changing values here over changing logic.
@@ -34,11 +34,12 @@ Personal use only, never distributed. Owner is a Swift beginner: keep changes sm
 - Energy saving: Default 30 FPS (configurable to 60 via menu). Rendering and window polling automatically pause when display sleeps or user session becomes inactive (NSWorkspace notifications), resuming on wake/active.
 - Launch at login: Menu toggle "로그인 시 실행" uses `SMAppService.mainApp` (requires `.app` bundle with `CFBundleIdentifier = com.codingfl05.snowfall` and `LSUIElement = true`).
 - Multi-display: Creates one overlay window and `SnowScene` per `NSScreen`, rebuilding all overlays on `NSApplication.didChangeScreenParametersNotification`.
+- Icicles: After a window remains still for `Config.icicleStartDelay` seconds, icicles grow downward from its bottom edge (count scales with window width, hidden where covered by front windows) and snap off into falling debris when the window moves or closes.
 
 ## Roadmap
 1. [x] Step 1 - Energy saving (30/60 FPS menu, pause on display sleep / session resign active)
 2. [x] Step 2 - .app bundle + launch at login (SMAppService)
 3. [x] Step 3 - Multi-display: one overlay per NSScreen
-4. Step 4 - Icicles under windows left alone
+4. [x] Step 4 - Icicles under windows left alone
 5. Step 5 - Snow on Dock and desktop icons (Accessibility API, needs permission)
 6. Step 6 - Snowman

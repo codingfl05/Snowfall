@@ -2,8 +2,12 @@
 set -e
 
 APP_DIR=".build/Snowfall.app"
-CONTENTS_DIR="$APP_DIR/Contents"
+STAGE_DIR="$(mktemp -d /tmp/snowfall-build.XXXXXX)"
+STAGE_APP="$STAGE_DIR/Snowfall.app"
+CONTENTS_DIR="$STAGE_APP/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
+
+trap 'rm -rf "$STAGE_DIR"' EXIT
 
 mkdir -p "$MACOS_DIR"
 
@@ -36,7 +40,9 @@ cat > "$CONTENTS_DIR/Info.plist" << 'EOF'
 </plist>
 EOF
 
-# iCloud Drive(Desktop)가 .app 폴더에 자동으로 붙이는 FinderInfo 속성을 제거해야 codesign이 성공함
-xattr -dr com.apple.FinderInfo "$APP_DIR" 2>/dev/null || true
-xattr -dr com.apple.ResourceFork "$APP_DIR" 2>/dev/null || true
-codesign --force --deep -s - "$APP_DIR"
+# iCloud Drive(Desktop)가 .app에 FinderInfo를 붙여 codesign이 실패하는 현상을 방지하기 위해 /tmp에서 서명 후 이동
+codesign --force --deep -s - "$STAGE_APP"
+
+mkdir -p .build
+rm -rf "$APP_DIR"
+mv "$STAGE_APP" "$APP_DIR"

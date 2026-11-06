@@ -39,6 +39,16 @@ enum Config {
     static let debrisAcceleration: CGFloat = 1.2     // 클수록 빨리 최고 속도 도달
     static let debrisMass: CGFloat = 2.5             // 다른 창에 떨어질 때 쌓이는 양 배율
 
+    // MARK: - Icicles (고드름)
+    static let icicleStartDelay: TimeInterval = 5.0                  // 창이 가만히 있으면 고드름이 자라기 시작하는 시간 (초)
+    static let iciclesPer100pt: Double = 2.5                         // 창 폭 100pt당 고드름 개수
+    static let icicleMinSpacing: CGFloat = 14                        // 고드름 간 최소 간격 (pt)
+    static let icicleEdgeInset: CGFloat = 16                         // 창 양 끝 둥근 모서리 여백 (pt)
+    static let icicleBaseWidthRange: ClosedRange<CGFloat> = 3.5...7.0 // 고드름 뿌리 폭 범위 (pt)
+    static let icicleMaxLengthRange: ClosedRange<CGFloat> = 14...38  // 고드름 최대 길이 범위 (pt)
+    static let icicleGrowthSpeedRange: ClosedRange<CGFloat> = 2.0...4.5 // 초당 자라는 속도 (pt/s)
+    static let icicleStaggerRange: ClosedRange<TimeInterval> = 0...2.5  // 고드름마다 자라기 시작하는 시간차 (초)
+
     // MARK: - Debug
     /// 터미널에서 `SNOW_DEBUG=1 swift run -c release` 로 실행하면 감지된 창 수 등을 출력
     static let debugLogging = ProcessInfo.processInfo.environment["SNOW_DEBUG"] != nil
