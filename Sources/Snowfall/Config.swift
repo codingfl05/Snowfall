@@ -5,7 +5,8 @@ import Foundation
 /// 눈의 "느낌"을 바꾸고 싶으면 로직 대신 이 파일의 숫자부터 바꿔볼 것.
 enum Config {
     // MARK: - Rendering
-    static let framesPerSecond = 60
+    static let framesPerSecond = 30                  // 기본 FPS (30 또는 60)
+    static let availableFrameRates = [30, 60]
 
     // MARK: - Falling flakes (내리는 눈)
     static let maxFlakes = 4000

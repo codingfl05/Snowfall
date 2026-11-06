@@ -9,15 +9,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
     private var intensityItems: [NSMenuItem] = []
+    private var fpsItems: [NSMenuItem] = []
+    private var isUserPaused = false
+    private var isDisplaySleeping = false
+    private var isSessionInactive = false
     private let tracker = WindowTracker()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupOverlay()
         setupStatusItem()
+        setupObservers()
+    }
+
+    private func setupObservers() {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenParametersChanged),
             name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+
+        // 화면 슬립 / 세션 비활성화 시 렌더링 및 윈도우 폴링 중단, 복귀 시 재개
+        let wsCenter = NSWorkspace.shared.notificationCenter
+        wsCenter.addObserver(
+            self,
+            selector: #selector(screensDidSleep),
+            name: NSWorkspace.screensDidSleepNotification,
+            object: nil
+        )
+        wsCenter.addObserver(
+            self,
+            selector: #selector(screensDidWake),
+            name: NSWorkspace.screensDidWakeNotification,
+            object: nil
+        )
+        wsCenter.addObserver(
+            self,
+            selector: #selector(sessionDidResignActive),
+            name: NSWorkspace.sessionDidResignActiveNotification,
+            object: nil
+        )
+        wsCenter.addObserver(
+            self,
+            selector: #selector(sessionDidBecomeActive),
+            name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )
     }
@@ -91,6 +126,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         intensityRoot.submenu = intensityMenu
         menu.addItem(intensityRoot)
 
+        let fpsMenu = NSMenu()
+        for rate in Config.availableFrameRates {
+            let mi = NSMenuItem(title: "\(rate)", action: #selector(selectFPS(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = rate
+            mi.state = (rate == Config.framesPerSecond) ? .on : .off
+            fpsMenu.addItem(mi)
+            fpsItems.append(mi)
+        }
+        let fpsRoot = NSMenuItem(title: "FPS", action: nil, keyEquivalent: "")
+        fpsRoot.submenu = fpsMenu
+        menu.addItem(fpsRoot)
+
         let pause = NSMenuItem(title: "일시정지", action: #selector(togglePause), keyEquivalent: "p")
         pause.target = self
         menu.addItem(pause)
@@ -119,15 +167,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func selectFPS(_ sender: NSMenuItem) {
+        guard let fps = sender.representedObject as? Int, let view = skView else { return }
+        view.preferredFramesPerSecond = fps
+        for mi in fpsItems {
+            mi.state = (mi.representedObject as? Int) == fps ? .on : .off
+        }
+    }
+
     @objc private func togglePause() {
+        isUserPaused.toggle()
+        pauseItem?.title = isUserPaused ? "다시 시작" : "일시정지"
+        updatePauseState()
+    }
+
+    @objc private func screensDidSleep() {
+        isDisplaySleeping = true
+        updatePauseState()
+    }
+
+    @objc private func screensDidWake() {
+        isDisplaySleeping = false
+        updatePauseState()
+    }
+
+    @objc private func sessionDidResignActive() {
+        isSessionInactive = true
+        updatePauseState()
+    }
+
+    @objc private func sessionDidBecomeActive() {
+        isSessionInactive = false
+        updatePauseState()
+    }
+
+    private func updatePauseState() {
         guard let view = skView, let window = overlayWindow else { return }
-        view.isPaused.toggle()
-        if view.isPaused {
+        let shouldPause = isUserPaused || isDisplaySleeping || isSessionInactive
+        view.isPaused = shouldPause
+        if shouldPause {
             window.orderOut(nil)
-            pauseItem?.title = "다시 시작"
         } else {
             window.orderFrontRegardless()
-            pauseItem?.title = "일시정지"
         }
     }
 
