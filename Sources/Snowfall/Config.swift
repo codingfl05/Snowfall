@@ -74,6 +74,23 @@ enum Config {
     static let snowmanHeadRadius: CGFloat = 11                       // 머리 눈덩이 반지름 (pt)
     static let snowmanDefaultDockHeight: CGFloat = 76                // Dock 감지 전 기본 Dock 높이 (pt)
 
+    // MARK: - Christmas Ornaments & CPU Load (크리스마스 오나먼트 & CPU 연동 전구)
+    static let defaultOrnamentsEnabled = true                        // 크리스마스 장식 표시 기본값
+    static let cpuPollInterval: TimeInterval = 1.0                   // 시스템 CPU 사용량 측정 주기 (초)
+    static let cpuSmoothingFactor: Double = 0.35                     // CPU 부하 지수 이동평균(EMA) 반영 비율
+    static let cpuOverloadThreshold: Double = 0.65                   // 과부하로 판단해 반짝임 강도를 높이는 기준 (0.0~1.0)
+    static let ornamentMinBlinkSpeed: Double = 1.8                   // 평상시(유휴 상태) 전구 숨쉬기 속도 (rad/s)
+    static let ornamentMaxBlinkSpeed: Double = 16.0                  // CPU 과부하 시 전구 점멸 최고 속도 (rad/s)
+    static let ornamentEdgeInsetLeft: CGFloat = 78                   // 창 왼쪽 상단 신호등 버튼(닫기/최소화/확대) 회피 여백 (pt)
+    static let ornamentEdgeInsetRight: CGFloat = 22                  // 창 오른쪽 상단 모서리 여백 (pt)
+    static let ornamentMinWindowWidth: CGFloat = 260                 // 장식을 달기 위한 최소 창 폭 (pt)
+    static let ornamentSpacing: CGFloat = 52                         // 가랜드 전구/오나먼트 간격 (pt)
+    static let ornamentSwagDrop: CGFloat = 7.5                       // 가랜드 전선이 아래로 처지는 깊이 (pt)
+    static let ornamentBaubleDrop: CGFloat = 13.0                    // 매달린 방울 오나먼트 줄 길이 (pt)
+    static let ornamentBulbRadius: CGFloat = 3.2                     // 꼬마전구 반지름 (pt)
+    static let ornamentBaubleRadius: CGFloat = 5.4                   // 방울 오나먼트 반지름 (pt)
+    static let ornamentGlowScaleRange: ClosedRange<CGFloat> = 0.75...1.45 // 전구 빛 번짐(halo) 크기 변화 범위
+
     // MARK: - Debug
     /// 터미널에서 `SNOW_DEBUG=1 swift run -c release` 로 실행하면 감지된 창 수 등을 출력
     static let debugLogging = ProcessInfo.processInfo.environment["SNOW_DEBUG"] != nil

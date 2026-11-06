@@ -15,6 +15,13 @@ final class SnowScene: SKScene {
             }
         }
     }
+    var isOrnamentsEnabled: Bool = Config.defaultOrnamentsEnabled {
+        didSet {
+            for pile in piles.values {
+                pile.ornamentsEnabled = isOrnamentsEnabled
+            }
+        }
+    }
 
     private var flakeTexture: SKTexture?
     private var active: [Flake] = []
@@ -56,6 +63,12 @@ final class SnowScene: SKScene {
         spawnFlakes(dt: dt)
         stepFlakes(dt: dt)
 
+        if isOrnamentsEnabled {
+            CPUMonitor.shared.updateIfNeeded(currentTime: clock)
+        }
+        let ornamentPhaseDelta = CPUMonitor.shared.currentBlinkSpeed * dt
+        let cpuOverload = CPUMonitor.shared.overloadIntensity
+
         for pile in pileOrder {
             pile.relax()
             emitSpill(from: pile)
@@ -63,6 +76,11 @@ final class SnowScene: SKScene {
 
             pile.stepIcicles(dt: dt)
             if pile.iciclesDirty { pile.redrawIcicles() }
+
+            if isOrnamentsEnabled {
+                if pile.ornamentsDirty { pile.redrawOrnaments() }
+                pile.stepOrnaments(phaseDelta: ornamentPhaseDelta, overload: cpuOverload)
+            }
         }
 
         stepSnowman(dt: dt)
@@ -133,7 +151,12 @@ final class SnowScene: SKScene {
                 }
                 order.append(pile)
             } else {
-                let pile = Pile(windowID: w.id, frame: w.frame, kind: w.kind)
+                let pile = Pile(
+                    windowID: w.id,
+                    frame: w.frame,
+                    kind: w.kind,
+                    ornamentsEnabled: isOrnamentsEnabled
+                )
                 addChild(pile.node)
                 piles[w.id] = pile
                 order.append(pile)

@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
     private var snowmanItem: NSMenuItem?
+    private var ornamentsItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
     private var intensityItems: [NSMenuItem] = []
     private var fpsItems: [NSMenuItem] = []
@@ -25,6 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return UserDefaults.standard.bool(forKey: "snowmanEnabled")
         }
         return Config.defaultSnowmanEnabled
+    }()
+    private var isOrnamentsEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: "ornamentsEnabled") != nil {
+            return UserDefaults.standard.bool(forKey: "ornamentsEnabled")
+        }
+        return Config.defaultOrnamentsEnabled
     }()
     private var isUserPaused = false
     private var isDisplaySleeping = false
@@ -119,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             scene.backgroundColor = .clear
             scene.intensity = currentIntensity
             scene.isSnowmanEnabled = isSnowmanEnabled
+            scene.isOrnamentsEnabled = isOrnamentsEnabled
             scene.tracker = tracker
             view.presentScene(scene)
             view.isPaused = shouldPause
@@ -187,6 +195,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(snowmanToggle)
         snowmanItem = snowmanToggle
 
+        let ornamentsToggle = NSMenuItem(title: "크리스마스 장식", action: #selector(toggleOrnaments), keyEquivalent: "")
+        ornamentsToggle.target = self
+        ornamentsToggle.state = isOrnamentsEnabled ? .on : .off
+        menu.addItem(ornamentsToggle)
+        ornamentsItem = ornamentsToggle
+
         let launchAtLogin = NSMenuItem(title: "로그인 시 실행", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLogin.target = self
         launchAtLogin.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
@@ -214,6 +228,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         snowmanItem?.state = isSnowmanEnabled ? .on : .off
         for overlay in overlays {
             overlay.scene.isSnowmanEnabled = isSnowmanEnabled
+        }
+    }
+
+    @objc private func toggleOrnaments() {
+        isOrnamentsEnabled.toggle()
+        UserDefaults.standard.set(isOrnamentsEnabled, forKey: "ornamentsEnabled")
+        ornamentsItem?.state = isOrnamentsEnabled ? .on : .off
+        for overlay in overlays {
+            overlay.scene.isOrnamentsEnabled = isOrnamentsEnabled
         }
     }
 
