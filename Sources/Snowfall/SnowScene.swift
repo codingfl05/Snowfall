@@ -88,7 +88,7 @@ final class SnowScene: SKScene {
         clock += dt
 
         pollTimer += dt
-        if pollTimer >= WindowTracker.currentPollInterval {
+        if WindowTracker.isDragging || pollTimer >= WindowTracker.currentPollInterval - 0.012 {
             pollTimer = 0
             refreshWindows()
         }

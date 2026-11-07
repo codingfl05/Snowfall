@@ -148,6 +148,7 @@ final class Pile {
     let node = SKShapeNode()
     let shadowNode = SKShapeNode()
     let icicleNode = SKShapeNode()
+    let ornamentRootNode = SKNode()
     let garlandCordNode = SKShapeNode()
     let ornamentCapNode = SKShapeNode()
     let ornamentLayerNode = SKNode()
@@ -196,6 +197,9 @@ final class Pile {
         icicleNode.isAntialiased = true
         node.addChild(icicleNode)
 
+        // 크리스마스 오나먼트 루트 노드: 창 좌상단(frame.minX, frame.maxY)을 원점으로 삼아 창과 1:1로 함께 이동
+        node.addChild(ornamentRootNode)
+
         // 크리스마스 가랜드 전선 (짙은 전나무 그린)
         garlandCordNode.fillColor = .clear
         garlandCordNode.strokeColor = NSColor(calibratedRed: 0.14, green: 0.36, blue: 0.23, alpha: 0.88)
@@ -203,17 +207,17 @@ final class Pile {
         garlandCordNode.lineCap = .round
         garlandCordNode.lineJoin = .round
         garlandCordNode.zPosition = -2
-        node.addChild(garlandCordNode)
+        ornamentRootNode.addChild(garlandCordNode)
 
         // 오나먼트 금색 매듭 줄과 꼭지 캡
         ornamentCapNode.fillColor = NSColor(calibratedRed: 0.92, green: 0.76, blue: 0.36, alpha: 0.95)
         ornamentCapNode.strokeColor = NSColor(calibratedRed: 0.82, green: 0.66, blue: 0.28, alpha: 0.85)
         ornamentCapNode.lineWidth = 0.85
         ornamentCapNode.zPosition = -1.5
-        node.addChild(ornamentCapNode)
+        ornamentRootNode.addChild(ornamentCapNode)
 
         ornamentLayerNode.zPosition = -1.2
-        node.addChild(ornamentLayerNode)
+        ornamentRootNode.addChild(ornamentLayerNode)
 
         reset(frame: frame)
     }
@@ -258,9 +262,14 @@ final class Pile {
         abs(newFrame.minY - frame.minY) > Config.moveThreshold
     }
 
-    /// 윗변은 그대로이고 아래쪽만 바뀐 경우 (예: 창 높이를 아래로 늘림) → 윗변 눈은 유지
+    /// 윗변은 그대로이고 아래쪽만 바뀐 경우 (예: 창 높이를 아래로 늘림) 또는 미세 위치 보정 시
     func updateFrame(_ newFrame: CGRect, resetIcicles: Bool) {
+        let widthChanged = abs(newFrame.width - frame.width) > Config.moveThreshold
         frame = newFrame
+        ornamentRootNode.position = CGPoint(x: newFrame.minX, y: newFrame.maxY)
+        if widthChanged {
+            seedOrnaments()
+        }
         if resetIcicles {
             seedIcicles()
         }
@@ -269,8 +278,9 @@ final class Pile {
     // MARK: - State
 
     func reset(frame newFrame: CGRect) {
-        let oldFrame = frame
+        let oldWidth = frame.width
         frame = newFrame
+        ornamentRootNode.position = CGPoint(x: newFrame.minX, y: newFrame.maxY)
         let inset: CGFloat
         switch kind {
         case .window: inset = Config.pileEdgeInset
@@ -290,21 +300,8 @@ final class Pile {
         forceImmediateRedraw = true
         seedIcicles()
 
-        // 창 폭은 그대로이고 위치만 이동한 경우 기존 오나먼트 노드를 재생성하지 않고 좌표만 이동 (애니메이션 끊김 방지)
-        if kind == .window,
-           ornamentsEnabled,
-           !ornaments.isEmpty,
-           abs(newFrame.width - oldFrame.width) <= Config.moveThreshold {
-            let dx = newFrame.minX - oldFrame.minX
-            let dy = newFrame.maxY - oldFrame.maxY
-            for item in ornaments {
-                item.x += dx
-                item.y += dy
-                item.anchorY += dy
-                item.containerNode.position = CGPoint(x: item.x, y: item.y)
-            }
-            ornamentsDirty = true
-        } else {
+        // 창 폭이 같으면 ornamentRootNode.position만 따라가므로 재생성이나 경로 재계산이 필요 없음
+        if ornaments.isEmpty || abs(newFrame.width - oldWidth) > Config.moveThreshold {
             seedOrnaments()
         }
     }
@@ -337,21 +334,22 @@ final class Pile {
         ornamentsDirty = false
     }
 
-    /// 창 상단 테두리(신호등 버튼 오른쪽 ~ 우측 상단 모서리)를 따라 가랜드 전선과 오나먼트/전구를 배치
+    /// 창 상단 테두리(신호등 버튼 오른쪽 ~ 우측 상단 모서리)를 따라 창 로컬 좌표계로 가랜드와 오나먼트 배치
     func seedOrnaments() {
         clearOrnaments()
         guard kind == .window,
               ornamentsEnabled,
               frame.width >= Config.ornamentMinWindowWidth else { return }
 
-        let startX = frame.minX + Config.ornamentEdgeInsetLeft
-        let endX = frame.maxX - Config.ornamentEdgeInsetRight
+        ornamentRootNode.position = CGPoint(x: frame.minX, y: frame.maxY)
+        let startX = Config.ornamentEdgeInsetLeft
+        let endX = frame.width - Config.ornamentEdgeInsetRight
         let span = endX - startX
         guard span >= Config.ornamentSpacing else { return }
 
         let segmentCount = max(2, Int((span / Config.ornamentSpacing).rounded()))
         let stepX = span / CGFloat(segmentCount)
-        let cordTopY = frame.maxY - 1.5
+        let cordTopY: CGFloat = -1.5
         let palette = Self.ornamentPalette
         // 창 ID마다 색상 시작 인덱스를 다르게 해 창마다 다채로운 조합을 만듦
         let colorSeed = Int(windowID) % palette.count
@@ -598,12 +596,15 @@ final class Pile {
             let overload = CPUMonitor.shared.overloadIntensity
             let globalPhase = Self.globalOrnamentPhase
             for (idx, item) in ornaments.enumerated() {
+                let gx = frame.minX + item.x
+                let gy = frame.maxY + item.y
+                let gAnchorY = frame.maxY + item.anchorY
                 let r = item.isBauble ? Config.ornamentBaubleRadius : Config.ornamentBulbRadius
                 let itemRect = CGRect(
-                    x: item.x - r,
-                    y: item.y - r,
+                    x: gx - r,
+                    y: gy - r,
                     width: r * 2,
-                    height: (item.anchorY - item.y) + r + 2
+                    height: (gAnchorY - gy) + r + 2
                 )
                 let v = !topRelevant.contains { $0.intersects(itemRect) }
                 if v != item.isVisible {

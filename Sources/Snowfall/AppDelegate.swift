@@ -77,7 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var effectiveFPS: Int {
-        isBatterySaverActive ? Config.batterySaverFPS : currentFPS
+        if WindowTracker.isDragging {
+            return 60
+        }
+        return isBatterySaverActive ? Config.batterySaverFPS : currentFPS
     }
 
     private var effectiveSpawnMultiplier: Double {
@@ -488,14 +491,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         handleWindowSwitchActivity()
     }
 
-    /// 앱 전환(Cmd+Tab), 스페이스 전환, 마우스 클릭 시 폴링 주기를 기다리지 않고
-    /// 즉시 창 순서 및 상단 크리스마스 조명을 갱신함.
+    /// 앱 전환(Cmd+Tab), 스페이스 전환, 마우스 클릭/드래그 시 폴링 주기를 기다리지 않고
+    /// 즉시 창 위치·순서 및 상단 크리스마스 조명을 갱신함.
     private func handleWindowSwitchActivity() {
         WindowTracker.noteActivity()
+        applyPerformanceSettings()
         refreshFullscreenAndWindowsImmediately()
-        // 마우스 클릭 직후 WindowServer의 창 z-order가 반영되는 시점을 한 번 더 즉시 캐치
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
-            self?.refreshFullscreenAndWindowsImmediately()
+        if !WindowTracker.isDragging {
+            // 마우스 클릭/드래그 종료 직후 WindowServer의 창 위치·z-order가 반영되는 시점을 한 번 더 즉시 캐치
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+                self?.refreshFullscreenAndWindowsImmediately()
+            }
         }
     }
 
