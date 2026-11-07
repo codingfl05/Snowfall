@@ -268,6 +268,14 @@ final class Pile {
         isDirty = true
     }
 
+    /// 고드름 상태와 경로를 모두 지움
+    func clearIcicles() {
+        stillTime = 0
+        icicles.removeAll()
+        icicleNode.path = nil
+        iciclesDirty = false
+    }
+
     /// 크리스마스 오나먼트와 가랜드 노드를 모두 제거하여 메모리 해제
     func clearOrnaments() {
         for ornament in ornaments {

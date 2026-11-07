@@ -6,11 +6,33 @@ import AppKit
 final class SnowScene: SKScene {
     var tracker: WindowTracker?
     var intensity: SnowIntensity = .normal
+    var isSnowEnabled: Bool = Config.defaultSnowEnabled {
+        didSet {
+            guard isSnowEnabled != oldValue else { return }
+            if isSnowEnabled {
+                prefillSky()
+                for pile in piles.values {
+                    pile.seedIcicles()
+                }
+                if isSnowmanEnabled {
+                    nextSnowmanTime = clock + 2.0
+                }
+            } else {
+                recycleAllFlakes()
+                removeSnowmanImmediately()
+                for pile in piles.values {
+                    pile.clear()
+                    pile.redraw()
+                    pile.clearIcicles()
+                }
+            }
+        }
+    }
     var isSnowmanEnabled: Bool = Config.defaultSnowmanEnabled {
         didSet {
             if !isSnowmanEnabled {
                 removeSnowmanImmediately()
-            } else if !oldValue {
+            } else if !oldValue && isSnowEnabled {
                 nextSnowmanTime = clock + 2.0
             }
         }
@@ -41,7 +63,9 @@ final class SnowScene: SKScene {
         backgroundColor = .clear
         if flakeTexture == nil { flakeTexture = SnowScene.makeFlakeTexture() }
         if !didPrefill {
-            prefillSky()
+            if isSnowEnabled {
+                prefillSky()
+            }
             didPrefill = true
         }
     }
@@ -60,8 +84,10 @@ final class SnowScene: SKScene {
             refreshWindows()
         }
 
-        spawnFlakes(dt: dt)
-        stepFlakes(dt: dt)
+        if isSnowEnabled {
+            spawnFlakes(dt: dt)
+            stepFlakes(dt: dt)
+        }
 
         if isOrnamentsEnabled {
             CPUMonitor.shared.updateIfNeeded(currentTime: clock)
@@ -70,12 +96,14 @@ final class SnowScene: SKScene {
         let cpuOverload = CPUMonitor.shared.overloadIntensity
 
         for pile in pileOrder {
-            pile.relax()
-            emitSpill(from: pile)
-            if pile.isDirty { pile.redraw() }
+            if isSnowEnabled {
+                pile.relax()
+                emitSpill(from: pile)
+                if pile.isDirty { pile.redraw() }
 
-            pile.stepIcicles(dt: dt)
-            if pile.iciclesDirty { pile.redrawIcicles() }
+                pile.stepIcicles(dt: dt)
+                if pile.iciclesDirty { pile.redrawIcicles() }
+            }
 
             if isOrnamentsEnabled {
                 if pile.ornamentsDirty { pile.redrawOrnaments() }
@@ -83,13 +111,16 @@ final class SnowScene: SKScene {
             }
         }
 
-        stepSnowman(dt: dt)
+        if isSnowEnabled {
+            stepSnowman(dt: dt)
+        }
     }
 
     // MARK: - Public controls
 
     /// 메뉴의 "쌓인 눈 털기": 모든 창의 눈과 고드름, 눈사람을 떨어뜨림
     func shakeOffAllSnow() {
+        guard isSnowEnabled else { return }
         for pile in pileOrder {
             dumpSnow(from: pile)
             dumpIcicles(from: pile)
@@ -116,7 +147,9 @@ final class SnowScene: SKScene {
         pileOrder.removeAll()
         removeSnowmanImmediately()
         recycleAllFlakes()
-        prefillSky()
+        if isSnowEnabled {
+            prefillSky()
+        }
     }
 
     /// 눈사람 노드와 참조를 즉시 해제하여 메모리 반환
@@ -139,12 +172,16 @@ final class SnowScene: SKScene {
             if let pile = piles[w.id] {
                 if pile.hasMoved(to: w.frame) {
                     // 창을 움직이면 쌓인 눈과 고드름이 미끄러져/부러져 떨어짐
-                    dumpSnow(from: pile)
-                    dumpIcicles(from: pile)
+                    if isSnowEnabled {
+                        dumpSnow(from: pile)
+                        dumpIcicles(from: pile)
+                    }
                     pile.reset(frame: w.frame)
                 } else if pile.hasBottomMoved(to: w.frame) {
                     // 아랫변만 움직인 경우 (창 아래쪽 크기 조절) → 고드름만 부러져 떨어짐
-                    dumpIcicles(from: pile)
+                    if isSnowEnabled {
+                        dumpIcicles(from: pile)
+                    }
                     pile.updateFrame(w.frame, resetIcicles: true)
                 } else {
                     pile.updateFrame(w.frame, resetIcicles: false)
@@ -165,8 +202,10 @@ final class SnowScene: SKScene {
 
         // 닫히거나 최소화된 창 → 눈과 고드름이 전부 떨어짐
         for (id, pile) in piles where !seen.contains(id) {
-            dumpSnow(from: pile)
-            dumpIcicles(from: pile)
+            if isSnowEnabled {
+                dumpSnow(from: pile)
+                dumpIcicles(from: pile)
+            }
             pile.node.removeFromParent()
             piles[id] = nil
         }

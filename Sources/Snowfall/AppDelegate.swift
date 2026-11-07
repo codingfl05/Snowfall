@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var fullscreenTimer: Timer?
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
+    private var snowItem: NSMenuItem?
+    private var intensityRootItem: NSMenuItem?
+    private var shakeItem: NSMenuItem?
     private var snowmanItem: NSMenuItem?
     private var ornamentsItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
@@ -23,6 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var fpsItems: [NSMenuItem] = []
     private var currentIntensity: SnowIntensity = .normal
     private var currentFPS: Int = Config.framesPerSecond
+    private var isSnowEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: "snowEnabled") != nil {
+            return UserDefaults.standard.bool(forKey: "snowEnabled")
+        }
+        return Config.defaultSnowEnabled
+    }()
     private var isSnowmanEnabled: Bool = {
         if UserDefaults.standard.object(forKey: "snowmanEnabled") != nil {
             return UserDefaults.standard.bool(forKey: "snowmanEnabled")
@@ -41,7 +50,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     private var isGloballyPaused: Bool {
-        isUserPaused || isDisplaySleeping || isSessionInactive || isLowPowerMode
+        isUserPaused
+            || isDisplaySleeping
+            || isSessionInactive
+            || isLowPowerMode
+            || (!isSnowEnabled && !isOrnamentsEnabled)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -161,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             scene.scaleMode = .resizeFill
             scene.backgroundColor = .clear
             scene.intensity = currentIntensity
+            scene.isSnowEnabled = isSnowEnabled
             scene.isSnowmanEnabled = isSnowmanEnabled
             scene.isOrnamentsEnabled = isOrnamentsEnabled
             scene.tracker = tracker
@@ -196,7 +210,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.button?.title = "❄︎"
 
         let menu = NSMenu()
+        menu.autoenablesItems = false
         menu.delegate = self
+
+        // 1. 눈 오는 기능 섹션
+        let snowToggle = NSMenuItem(title: "눈 내리기", action: #selector(toggleSnow), keyEquivalent: "")
+        snowToggle.target = self
+        snowToggle.state = isSnowEnabled ? .on : .off
+        menu.addItem(snowToggle)
+        snowItem = snowToggle
 
         let intensityMenu = NSMenu()
         for level in SnowIntensity.allCases {
@@ -209,8 +231,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let intensityRoot = NSMenuItem(title: "눈 양", action: nil, keyEquivalent: "")
         intensityRoot.submenu = intensityMenu
+        intensityRoot.isEnabled = isSnowEnabled
         menu.addItem(intensityRoot)
+        intensityRootItem = intensityRoot
 
+        let snowmanToggle = NSMenuItem(title: "눈사람 표시", action: #selector(toggleSnowman), keyEquivalent: "")
+        snowmanToggle.target = self
+        snowmanToggle.state = isSnowmanEnabled ? .on : .off
+        snowmanToggle.isEnabled = isSnowEnabled
+        menu.addItem(snowmanToggle)
+        snowmanItem = snowmanToggle
+
+        let shake = NSMenuItem(title: "쌓인 눈 털기", action: #selector(shakeOffSnow), keyEquivalent: "")
+        shake.target = self
+        shake.isEnabled = isSnowEnabled
+        menu.addItem(shake)
+        shakeItem = shake
+
+        menu.addItem(.separator())
+
+        // 2. 크리스마스 조명 기능 섹션 (눈 기능과 독립적으로 켜고 끌 수 있음)
+        let ornamentsToggle = NSMenuItem(title: "크리스마스 조명", action: #selector(toggleOrnaments), keyEquivalent: "")
+        ornamentsToggle.target = self
+        ornamentsToggle.state = isOrnamentsEnabled ? .on : .off
+        menu.addItem(ornamentsToggle)
+        ornamentsItem = ornamentsToggle
+
+        menu.addItem(.separator())
+
+        // 3. 공통 렌더링 및 실행 설정
         let fpsMenu = NSMenu()
         for rate in Config.availableFrameRates {
             let mi = NSMenuItem(title: "\(rate)", action: #selector(selectFPS(_:)), keyEquivalent: "")
@@ -228,22 +277,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pause.target = self
         menu.addItem(pause)
         pauseItem = pause
-
-        let shake = NSMenuItem(title: "쌓인 눈 털기", action: #selector(shakeOffSnow), keyEquivalent: "")
-        shake.target = self
-        menu.addItem(shake)
-
-        let snowmanToggle = NSMenuItem(title: "눈사람 표시", action: #selector(toggleSnowman), keyEquivalent: "")
-        snowmanToggle.target = self
-        snowmanToggle.state = isSnowmanEnabled ? .on : .off
-        menu.addItem(snowmanToggle)
-        snowmanItem = snowmanToggle
-
-        let ornamentsToggle = NSMenuItem(title: "크리스마스 장식", action: #selector(toggleOrnaments), keyEquivalent: "")
-        ornamentsToggle.target = self
-        ornamentsToggle.state = isOrnamentsEnabled ? .on : .off
-        menu.addItem(ornamentsToggle)
-        ornamentsItem = ornamentsToggle
 
         let launchAtLogin = NSMenuItem(title: "로그인 시 실행", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLogin.target = self
@@ -266,6 +299,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         launchAtLoginItem?.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
     }
 
+    @objc private func toggleSnow() {
+        isSnowEnabled.toggle()
+        UserDefaults.standard.set(isSnowEnabled, forKey: "snowEnabled")
+        snowItem?.state = isSnowEnabled ? .on : .off
+        intensityRootItem?.isEnabled = isSnowEnabled
+        snowmanItem?.isEnabled = isSnowEnabled
+        shakeItem?.isEnabled = isSnowEnabled
+        for overlay in overlays {
+            overlay.scene.isSnowEnabled = isSnowEnabled
+        }
+        updatePauseState()
+    }
+
     @objc private func toggleSnowman() {
         isSnowmanEnabled.toggle()
         UserDefaults.standard.set(isSnowmanEnabled, forKey: "snowmanEnabled")
@@ -282,6 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for overlay in overlays {
             overlay.scene.isOrnamentsEnabled = isOrnamentsEnabled
         }
+        updatePauseState()
     }
 
     @objc private func toggleLaunchAtLogin() {

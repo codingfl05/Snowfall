@@ -9,6 +9,7 @@ enum Config {
     static let availableFrameRates = [30, 60]
 
     // MARK: - Falling flakes (내리는 눈)
+    static let defaultSnowEnabled = true             // 눈 내리기 기능 기본값
     static let maxFlakes = 4000
     static let flakeRadiusRange: ClosedRange<CGFloat> = 1.1...4.0
     static let baseFallSpeed: CGFloat = 24           // pt/s
