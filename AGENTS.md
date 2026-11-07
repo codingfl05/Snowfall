@@ -7,7 +7,7 @@ Personal use only, never distributed. Owner is a Swift beginner: keep changes sm
 - Swift Package, no Xcode project. Target: macOS 26, Apple Silicon.
 - Note: `swift build` fails on this toolchain (linking issue with PackageDescription manifest API).
 - Run: `./run.sh` (builds and opens `.build/Snowfall.app`; debug: `SNOW_DEBUG=1 ./run.sh`).
-- Build only: `./build.sh` (outputs ad-hoc signed `.build/Snowfall.app` with `Info.plist`).
+- Build only: `./build.sh` (outputs `.build/Snowfall.app` signed with self-signed certificate `"Snowfall Dev"` so Accessibility permission survives rebuilds, falling back to ad-hoc `-s -` with a warning if missing).
 - tools-version 5.9 = Swift 5 language mode. Do NOT switch to Swift 6 mode unless asked.
 
 ## Files (Sources/Snowfall)
@@ -17,8 +17,8 @@ Personal use only, never distributed. Owner is a Swift beginner: keep changes sm
 - Pile.swift — per-surface snow heightmap (columns), slope relaxation, top-border Christmas garland & ornament bulbs (`OrnamentBulb`), bottom-edge icicles (`Icicle`), occlusion mask, SKShapeNode drawing.
 - CPUMonitor.swift — samples system-wide CPU usage (`host_statistics` with `HOST_CPU_LOAD_INFO`) at `Config.cpuPollInterval` (1 Hz) to drive ornament bulb blink speed and overload sparkle intensity.
 - Flake.swift — pooled flake (SKSpriteNode). Never allocate flakes per frame; use obtainFlake/recycle.
-- WindowTracker.swift — combines Dock items, CGWindowList layer-0 windows, and Finder desktop icons front-to-back, converted to per-screen scene coords.
-- AccessibilityTracker.swift — uses `AXUIElement` (`AXIsProcessTrustedWithOptions` once at launch) to read Dock item frames and Finder desktop icon frames (4 Hz cached); falls back gracefully to windows-only if denied.
+- WindowTracker.swift — shares a single `CGWindowListCopyWindowInfo` snapshot per poll across all screens, detects per-screen fullscreen frontmost apps, and combines Dock items, layer-0 windows, and Finder desktop icons front-to-back in per-screen scene coords.
+- AccessibilityTracker.swift — uses `AXUIElement` (`AXIsProcessTrustedWithOptions` once at launch, `AXUIElementSetMessagingTimeout(..., 0.1)` on Dock & Finder app elements) to read Dock item frames (4 Hz, IDs hashed from title only) and Finder desktop icon frames (`Config.axDesktopPollInterval` = 1 Hz); falls back gracefully to windows-only if denied.
 - Snowman.swift — animated snowman (`Snowman`) whose two snowballs roll onto the Dock area, stack up, put on a red scarf, wave with a twig arm, and slowly melt away.
 - Config.swift — ALL tunables. Prefer changing values here over changing logic.
 
@@ -34,9 +34,9 @@ Personal use only, never distributed. Owner is a Swift beginner: keep changes sm
 - Snow lands and draws only on columns whose top edge is not covered by a window in front.
 - Accessibility permission (`AXIsProcessTrustedWithOptions`) is requested once on launch for Dock & Finder desktop icon frames; if denied, the app continues working with windows only without crashing or repeating prompts.
 - AppKit/SpriteKit-touching classes are main-actor.
-- Energy saving: Default 30 FPS (configurable to 60 via menu). Rendering and window polling automatically pause when display sleeps or user session becomes inactive (NSWorkspace notifications), resuming on wake/active.
+- Energy saving: Default 30 FPS (configurable to 60 via menu). Rendering and window polling automatically pause when display sleeps, user session becomes inactive, Low Power Mode is enabled (`ProcessInfo.isLowPowerModeEnabled` + `NSProcessInfoPowerStateDidChange`), or on any screen where the frontmost app is fullscreen, resuming automatically when conditions clear.
 - Launch at login: Menu toggle "로그인 시 실행" uses `SMAppService.mainApp` (requires `.app` bundle with `CFBundleIdentifier = com.codingfl05.snowfall` and `LSUIElement = true`).
-- Multi-display: Creates one overlay window and `SnowScene` per `NSScreen`, rebuilding all overlays on `NSApplication.didChangeScreenParametersNotification`.
+- Multi-display: Creates one overlay window and `SnowScene` per `NSScreen`, rebuilding all overlays on `NSApplication.didChangeScreenParametersNotification`, and shares a single `CGWindowListCopyWindowInfo` snapshot per poll across all screens' trackers.
 - Icicles: After a window remains still for `Config.icicleStartDelay` seconds, icicles grow downward from its bottom edge (count scales with window width, hidden where covered by front windows) and snap off into falling debris when the window moves or closes.
 - Dock & desktop icons: Treated as `Pile` surfaces (`SurfaceKind.dockItem` in front of windows, `SurfaceKind.desktopIcon` behind windows so windows occlude desktop icons, with top-offset and dome taper so snow sits naturally on folder icons). Stage Manager strip thumbnails and system overlay windows (`WindowManager`, `Dock`, `Control Center`) are excluded from window tracking.
 - Snowman: Periodically (`Config.snowmanFirstDelay` then `Config.snowmanIntervalRange`), two snowballs roll onto the Dock area, stack into a snowman with a red scarf and carrot nose, wave, and melt away. Can be toggled on/off via the "눈사람 표시" menu item (persisted in `UserDefaults`, immediately destroying and deallocating nodes when turned off).

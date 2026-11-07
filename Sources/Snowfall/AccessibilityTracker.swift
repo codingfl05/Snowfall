@@ -21,7 +21,8 @@ final class AccessibilityTracker {
     }
 
     private var didPrompt = false
-    private var lastPollTime: TimeInterval = 0
+    private var lastDockPollTime: TimeInterval = 0
+    private var lastDesktopPollTime: TimeInterval = 0
     private var cachedDockItems: [RawSurface] = []
     private var cachedDesktopIcons: [RawSurface] = []
 
@@ -35,7 +36,7 @@ final class AccessibilityTracker {
         _ = AXIsProcessTrustedWithOptions(options)
     }
 
-    /// 현재 Dock 아이템들과 바탕화면 아이콘들의 글로벌 CG 좌표를 반환 (4Hz 캐싱).
+    /// 현재 Dock 아이템(4Hz 캐싱)들과 바탕화면 아이콘(1Hz 캐싱)들의 글로벌 CG 좌표를 반환.
     func currentSurfaces() -> (dockItems: [RawSurface], desktopIcons: [RawSurface]) {
         // AXIsProcessTrusted()는 팝업 없이 현재 권한 허용 여부만 즉시 확인함
         guard AXIsProcessTrusted() else {
@@ -45,9 +46,12 @@ final class AccessibilityTracker {
         }
 
         let now = ProcessInfo.processInfo.systemUptime
-        if now - lastPollTime >= Config.axPollInterval {
-            lastPollTime = now
+        if now - lastDockPollTime >= Config.axPollInterval {
+            lastDockPollTime = now
             cachedDockItems = fetchDockItems()
+        }
+        if now - lastDesktopPollTime >= Config.axDesktopPollInterval {
+            lastDesktopPollTime = now
             cachedDesktopIcons = fetchDesktopIcons()
         }
         return (cachedDockItems, cachedDesktopIcons)
@@ -60,16 +64,22 @@ final class AccessibilityTracker {
             return []
         }
         let appElement = AXUIElementCreateApplication(dockApp.processIdentifier)
+        // Dock 프로세스가 응답이 느릴 때 메인 스레드가 블로킹되지 않도록 타임아웃(0.1초) 설정
+        AXUIElementSetMessagingTimeout(appElement, Config.axMessagingTimeout)
         var results: [RawSurface] = []
 
         for child in children(of: appElement) {
             guard stringAttribute(kAXRoleAttribute as String, of: child) == "AXList" else { continue }
-            for (index, item) in children(of: child).enumerated() {
+            for item in children(of: child) {
                 let subrole = stringAttribute(kAXSubroleAttribute as String, of: item) ?? ""
                 if subrole == "AXSeparatorDockItem" { continue }
 
-                guard let rect = frame(of: item), isValidIconSize(rect.size) else { continue }
-                let id = stableID(prefix: 0x8000_0000, element: item, fallbackIndex: index)
+                // Dock 아이템 순서(index)가 바뀌어도 눈이 털리지 않도록 제목(title)만으로 ID 생성
+                guard let title = stringAttribute(kAXTitleAttribute as String, of: item),
+                      !title.isEmpty,
+                      let rect = frame(of: item),
+                      isValidIconSize(rect.size) else { continue }
+                let id = titleHashID(prefix: 0x8000_0000, title: title)
                 results.append(RawSurface(id: id, cgRect: rect, kind: .dockItem))
             }
         }
@@ -83,6 +93,8 @@ final class AccessibilityTracker {
             return []
         }
         let appElement = AXUIElementCreateApplication(finderApp.processIdentifier)
+        // Finder 응답 지연 시 메인 스레드 블로킹 방지를 위해 타임아웃(0.1초) 설정
+        AXUIElementSetMessagingTimeout(appElement, Config.axMessagingTimeout)
         var results: [RawSurface] = []
         collectDesktopIcons(from: appElement, depth: 0, insideDesktopContainer: false, into: &results)
         return results
@@ -177,15 +189,20 @@ final class AccessibilityTracker {
         return CGRect(origin: point, size: size)
     }
 
-    /// 아이콘 제목과 순번을 조합해 고정된 CGWindowID를 생성 (움직였을 때 눈 털림 판정에 사용)
+    /// 제목(title) 문자열만으로 고정된 CGWindowID를 생성 (Dock 아이템 등 순서가 바뀌어도 동일한 ID 유지)
+    private func titleHashID(prefix: UInt32, title: String) -> CGWindowID {
+        var hash: UInt32 = 2166136261
+        for byte in title.utf8 {
+            hash ^= UInt32(byte)
+            hash &*= 16777619
+        }
+        return prefix | (hash & 0x0FFF_FFFF)
+    }
+
+    /// 바탕화면 아이콘 제목(없을 경우 순번)으로 고정된 CGWindowID를 생성
     private func stableID(prefix: UInt32, element: AXUIElement, fallbackIndex: Int) -> CGWindowID {
         if let title = stringAttribute(kAXTitleAttribute as String, of: element), !title.isEmpty {
-            var hash: UInt32 = 2166136261
-            for byte in title.utf8 {
-                hash ^= UInt32(byte)
-                hash &*= 16777619
-            }
-            return prefix | ((hash & 0x0FFF_FFFF) ^ UInt32(fallbackIndex & 0xFF))
+            return titleHashID(prefix: prefix, title: title)
         }
         return prefix | UInt32(fallbackIndex & 0x0FFF_FFFF)
     }

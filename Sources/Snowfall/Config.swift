@@ -30,6 +30,7 @@ enum Config {
 
     // MARK: - Window tracking (창 감지)
     static let windowPollInterval: TimeInterval = 0.05   // 20 Hz
+    static let fullscreenPollInterval: TimeInterval = 0.25 // 전체화면 상태 확인 주기 (4 Hz)
     static let moveThreshold: CGFloat = 0.5              // 이 이상 움직이면 "창이 움직였다"로 판단
     static let minWindowSize = CGSize(width: 220, height: 120) // 스테이지 매니저 썸네일 등 작은 보조 창 제외
     static let stageManagerStripWidth: CGFloat = 195     // 화면 왼쪽 스테이지 매니저 프리뷰 영역 폭 (pt)
@@ -52,7 +53,9 @@ enum Config {
     static let icicleStaggerRange: ClosedRange<TimeInterval> = 0...2.5  // 고드름마다 자라기 시작하는 시간차 (초)
 
     // MARK: - Dock & Desktop icons (Accessibility)
-    static let axPollInterval: TimeInterval = 0.25                   // Dock/바탕화면 아이콘 위치 갱신 주기 (4 Hz)
+    static let axPollInterval: TimeInterval = 0.25                   // Dock 아이콘 위치 갱신 주기 (4 Hz)
+    static let axDesktopPollInterval: TimeInterval = 1.0             // Finder 바탕화면 아이콘 위치 갱신 주기 (1 Hz)
+    static let axMessagingTimeout: Float = 0.1                       // AX IPC 응답 대기 상한 (초)
     static let minIconSize = CGSize(width: 24, height: 24)
     static let maxIconSize = CGSize(width: 220, height: 220)
     static let iconEdgeInset: CGFloat = 5                            // Dock 아이콘 양 끝 여백 (pt)

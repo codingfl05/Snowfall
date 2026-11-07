@@ -9,9 +9,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let view: SKView
         let scene: SnowScene
         let tracker: WindowTracker
+        var isFullscreenPaused: Bool = false
     }
 
     private var overlays: [ScreenOverlay] = []
+    private var fullscreenTimer: Timer?
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
     private var snowmanItem: NSMenuItem?
@@ -36,6 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isUserPaused = false
     private var isDisplaySleeping = false
     private var isSessionInactive = false
+    private var isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+
+    private var isGloballyPaused: Bool {
+        isUserPaused || isDisplaySleeping || isSessionInactive || isLowPowerMode
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AccessibilityTracker.shared.requestPermissionOnce()
@@ -52,7 +59,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             object: nil
         )
 
-        // 화면 슬립 / 세션 비활성화 시 렌더링 및 윈도우 폴링 중단, 복귀 시 재개
+        // 저전력 모드(Low Power Mode) 켜짐/꺼짐 감지
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(powerStateChanged),
+            name: Notification.Name.NSProcessInfoPowerStateDidChange,
+            object: nil
+        )
+
+        // 화면 슬립 / 세션 비활성화 / 앱 전환 / 스페이스 전환 감지
         let wsCenter = NSWorkspace.shared.notificationCenter
         wsCenter.addObserver(
             self,
@@ -78,6 +93,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )
+        wsCenter.addObserver(
+            self,
+            selector: #selector(frontmostContextChanged),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        wsCenter.addObserver(
+            self,
+            selector: #selector(frontmostContextChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+
+        // 전체화면으로 일시정지된 화면에서도 전체화면 해제 시 자동 재개할 수 있도록 주기적으로 확인
+        fullscreenTimer = Timer.scheduledTimer(withTimeInterval: Config.fullscreenPollInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshFullscreenStates()
+            }
+        }
     }
 
     // MARK: - Overlay windows (Multi-display)
@@ -95,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let screens = NSScreen.screens
         guard let primaryHeight = screens.first?.frame.height else { return }
-        let shouldPause = isUserPaused || isDisplaySleeping || isSessionInactive
+        let windowList = WindowTracker.sharedWindowList(forceRefresh: true)
 
         for screen in screens {
             let frame = screen.frame
@@ -120,6 +154,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let tracker = WindowTracker()
             tracker.screenFrame = frame
             tracker.primaryScreenHeight = primaryHeight
+            let isFullscreen = tracker.isFrontmostAppFullscreen(in: windowList)
+            let shouldPause = isGloballyPaused || isFullscreen
 
             let scene = SnowScene(size: frame.size)
             scene.scaleMode = .resizeFill
@@ -137,7 +173,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 window.orderFrontRegardless()
             }
 
-            overlays.append(ScreenOverlay(window: window, view: view, scene: scene, tracker: tracker))
+            overlays.append(
+                ScreenOverlay(
+                    window: window,
+                    view: view,
+                    scene: scene,
+                    tracker: tracker,
+                    isFullscreenPaused: isFullscreen
+                )
+            )
         }
     }
 
@@ -286,6 +330,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updatePauseState()
     }
 
+    @objc nonisolated private func powerStateChanged(_ notification: Notification) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+            self.updatePauseState()
+        }
+    }
+
+    @objc private func frontmostContextChanged() {
+        refreshFullscreenStates(forceSnapshot: true)
+    }
+
     @objc private func screensDidSleep() {
         isDisplaySleeping = true
         updatePauseState()
@@ -293,6 +349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func screensDidWake() {
         isDisplaySleeping = false
+        refreshFullscreenStates(forceSnapshot: true)
         updatePauseState()
     }
 
@@ -303,12 +360,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func sessionDidBecomeActive() {
         isSessionInactive = false
+        refreshFullscreenStates(forceSnapshot: true)
         updatePauseState()
     }
 
+    /// 각 디스플레이별로 최전면 앱이 전체화면인지 확인하고 변경 시 일시정지/재개 반영
+    private func refreshFullscreenStates(forceSnapshot: Bool = false) {
+        guard !isGloballyPaused, !overlays.isEmpty else { return }
+        let windowList = WindowTracker.sharedWindowList(forceRefresh: forceSnapshot)
+        var changed = false
+        for i in overlays.indices {
+            let fullscreen = overlays[i].tracker.isFrontmostAppFullscreen(in: windowList)
+            if overlays[i].isFullscreenPaused != fullscreen {
+                overlays[i].isFullscreenPaused = fullscreen
+                changed = true
+            }
+        }
+        if changed {
+            updatePauseState()
+        }
+    }
+
     private func updatePauseState() {
-        let shouldPause = isUserPaused || isDisplaySleeping || isSessionInactive
+        let globalPause = isGloballyPaused
         for overlay in overlays {
+            let shouldPause = globalPause || overlay.isFullscreenPaused
+            guard overlay.view.isPaused != shouldPause else { continue }
             overlay.view.isPaused = shouldPause
             if shouldPause {
                 overlay.window.orderOut(nil)
