@@ -92,15 +92,20 @@ final class Pile {
     private(set) var originX: CGFloat = 0
     private(set) var heights: [CGFloat] = []
     private(set) var visible: [Bool] = []     // 앞에 있는 창에 가려진 칸은 false
+    private(set) var hasVisibleColumns = true // 보이는 칸이 하나라도 있는지 캐싱 (land 조기 종료용)
     var spillLeft: CGFloat = 0                // 왼쪽 끝으로 흘러넘친 양
     var spillRight: CGFloat = 0
-    private(set) var isDirty = true           // true면 다음 frame에 다시 그림
+    private(set) var isDirty = true           // true면 다시 그려야 함
+    private(set) var forceImmediateRedraw = true // 창 이동/초기화/가려짐 변화 시 즉시 다시 그림
+    private var timeSinceLastRedraw: TimeInterval = 0
     private var needsRelax = false
 
     // 고드름 상태
     private(set) var icicles: [Icicle] = []
     private(set) var stillTime: TimeInterval = 0
     private(set) var iciclesDirty = true
+    private(set) var forceImmediateIcicleRedraw = true
+    private var timeSinceLastIcicleRedraw: TimeInterval = 0
 
     // 크리스마스 오나먼트 상태
     var ornamentsEnabled: Bool = Config.defaultOrnamentsEnabled {
@@ -206,6 +211,7 @@ final class Pile {
     /// 고드름이 매달리는 기준선 (창 아랫변보다 살짝 위 → 창 밑에 붙어 있는 느낌)
     var bottomBase: CGFloat { frame.minY + 0.5 }
     var endX: CGFloat { originX + CGFloat(heights.count) * Config.columnWidth }
+    var maxSurfacePileHeight: CGFloat { (kind == .window) ? Config.maxPileHeight : Config.maxIconPileHeight }
     var totalSnow: CGFloat { heights.reduce(0, +) }
 
     func columnCenterX(_ c: Int) -> CGFloat {
@@ -252,10 +258,12 @@ final class Pile {
         originX = newFrame.midX - CGFloat(count) * Config.columnWidth / 2
         heights = Array(repeating: 0, count: count)
         visible = Array(repeating: true, count: count)
+        hasVisibleColumns = !visible.isEmpty
         spillLeft = 0
         spillRight = 0
         needsRelax = false
         isDirty = true
+        forceImmediateRedraw = true
         seedIcicles()
         seedOrnaments()
     }
@@ -266,6 +274,7 @@ final class Pile {
         spillRight = 0
         needsRelax = false
         isDirty = true
+        forceImmediateRedraw = true
     }
 
     /// 고드름 상태와 경로를 모두 지움
@@ -353,6 +362,7 @@ final class Pile {
             }
         }
         ornamentsDirty = true
+        stepOrnaments(phaseDelta: 0, overload: CPUMonitor.shared.overloadIntensity)
     }
 
     /// CPU 부하에 비례하는 phaseDelta만큼 오나먼트 전구 위상을 진행시키고 빛 번짐(glow)과 밝기를 갱신
@@ -390,6 +400,7 @@ final class Pile {
         stillTime = 0
         icicles.removeAll()
         iciclesDirty = true
+        forceImmediateIcicleRedraw = true
         guard kind == .window else { return }
 
         let minX = frame.minX + Config.icicleEdgeInset
@@ -531,7 +542,11 @@ final class Pile {
                     changed = true
                 }
             }
-            if changed { isDirty = true }
+            if changed {
+                hasVisibleColumns = visible.contains(true)
+                isDirty = true
+                forceImmediateRedraw = true
+            }
         }
 
         if !icicles.isEmpty {
@@ -548,7 +563,10 @@ final class Pile {
                     icicleChanged = true
                 }
             }
-            if icicleChanged { iciclesDirty = true }
+            if icicleChanged {
+                iciclesDirty = true
+                forceImmediateIcicleRedraw = true
+            }
         }
 
         if !ornaments.isEmpty {
@@ -573,9 +591,25 @@ final class Pile {
 
     // MARK: - Drawing
 
+    /// SKShapeNode path 재구성을 최대 Config.pileRedrawHz(8 Hz)로 제한하되,
+    /// 가려짐(visibility) 변화나 창 이동/초기화 시에는 즉시 다시 그리도록 판정.
+    func shouldRedrawPile(dt: TimeInterval) -> Bool {
+        timeSinceLastRedraw += dt
+        guard isDirty else { return false }
+        return forceImmediateRedraw || timeSinceLastRedraw >= Config.pileRedrawInterval
+    }
+
+    func shouldRedrawIcicles(dt: TimeInterval) -> Bool {
+        timeSinceLastIcicleRedraw += dt
+        guard iciclesDirty else { return false }
+        return forceImmediateIcicleRedraw || timeSinceLastIcicleRedraw >= Config.pileRedrawInterval
+    }
+
     /// 보이는 칸들을 이어 부드러운 곡선 모양(path)으로 그림.
     func redraw() {
         isDirty = false
+        forceImmediateRedraw = false
+        timeSinceLastRedraw = 0
         let path = CGMutablePath()
         let shadowPath = CGMutablePath()
         let cw = Config.columnWidth
@@ -617,6 +651,8 @@ final class Pile {
     /// 아랫변이 가려지지 않은 위치의 고드름들을 뾰족한 얼음 기둥 모양으로 그림.
     func redrawIcicles() {
         iciclesDirty = false
+        forceImmediateIcicleRedraw = false
+        timeSinceLastIcicleRedraw = 0
         let path = CGMutablePath()
         let topY = bottomBase
 

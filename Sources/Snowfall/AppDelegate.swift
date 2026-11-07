@@ -1,4 +1,5 @@
 import AppKit
+import IOKit.ps
 import ServiceManagement
 import SpriteKit
 
@@ -14,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var overlays: [ScreenOverlay] = []
     private var fullscreenTimer: Timer?
+    private var powerRunLoopSource: CFRunLoopSource?
     private var statusItem: NSStatusItem?
     private var pauseItem: NSMenuItem?
     private var snowItem: NSMenuItem?
@@ -24,8 +26,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var launchAtLoginItem: NSMenuItem?
     private var intensityItems: [NSMenuItem] = []
     private var fpsItems: [NSMenuItem] = []
+    private var batterySaverItems: [NSMenuItem] = []
     private var currentIntensity: SnowIntensity = .normal
     private var currentFPS: Int = Config.framesPerSecond
+    private var batterySaverMode: BatterySaverMode = {
+        if let raw = UserDefaults.standard.string(forKey: "batterySaverMode"),
+           let mode = BatterySaverMode(rawValue: raw) {
+            return mode
+        }
+        return Config.defaultBatterySaverMode
+    }()
+    private var isOnBattery: Bool = AppDelegate.checkOnBatteryPower()
     private var isSnowEnabled: Bool = {
         if UserDefaults.standard.object(forKey: "snowEnabled") != nil {
             return UserDefaults.standard.bool(forKey: "snowEnabled")
@@ -57,6 +68,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             || (!isSnowEnabled && !isOrnamentsEnabled)
     }
 
+    private var isBatterySaverActive: Bool {
+        switch batterySaverMode {
+        case .off: return false
+        case .auto: return isOnBattery
+        case .always: return true
+        }
+    }
+
+    private var effectiveFPS: Int {
+        isBatterySaverActive ? Config.batterySaverFPS : currentFPS
+    }
+
+    private var effectiveSpawnMultiplier: Double {
+        isBatterySaverActive ? Config.batterySaverSpawnMultiplier : 1.0
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AccessibilityTracker.shared.requestPermissionOnce()
         rebuildOverlays()
@@ -65,6 +92,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func setupObservers() {
+        WindowTracker.installMouseMonitorsIfNeeded()
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenParametersChanged),
@@ -79,6 +108,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: Notification.Name.NSProcessInfoPowerStateDidChange,
             object: nil
         )
+
+        // 전원 공급원(배터리 ↔ 전원 어댑터) 변경 감지
+        if let source = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context else { return }
+            let delegate = Unmanaged<AppDelegate>.fromOpaque(context).takeUnretainedValue()
+            Task { @MainActor in
+                delegate.powerSourceChanged()
+            }
+        }, Unmanaged.passUnretained(self).toOpaque())?.takeRetainedValue() {
+            powerRunLoopSource = source
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+        }
 
         // 화면 슬립 / 세션 비활성화 / 앱 전환 / 스페이스 전환 감지
         let wsCenter = NSWorkspace.shared.notificationCenter
@@ -160,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             let view = SKView(frame: NSRect(origin: .zero, size: frame.size))
             view.allowsTransparency = true
-            view.preferredFramesPerSecond = currentFPS
+            view.preferredFramesPerSecond = effectiveFPS
             view.ignoresSiblingOrder = true
             view.autoresizingMask = [.width, .height]
 
@@ -174,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             scene.scaleMode = .resizeFill
             scene.backgroundColor = .clear
             scene.intensity = currentIntensity
+            scene.spawnRateMultiplier = effectiveSpawnMultiplier
             scene.isSnowEnabled = isSnowEnabled
             scene.isSnowmanEnabled = isSnowmanEnabled
             scene.isOrnamentsEnabled = isOrnamentsEnabled
@@ -273,6 +315,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fpsRoot.submenu = fpsMenu
         menu.addItem(fpsRoot)
 
+        let batteryMenu = NSMenu()
+        for mode in BatterySaverMode.allCases {
+            let mi = NSMenuItem(title: mode.title, action: #selector(selectBatterySaver(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = mode.rawValue
+            mi.state = (mode == batterySaverMode) ? .on : .off
+            batteryMenu.addItem(mi)
+            batterySaverItems.append(mi)
+        }
+        let batteryRoot = NSMenuItem(title: "배터리 절약", action: nil, keyEquivalent: "")
+        batteryRoot.submenu = batteryMenu
+        menu.addItem(batteryRoot)
+
         let pause = NSMenuItem(title: "일시정지", action: #selector(togglePause), keyEquivalent: "p")
         pause.target = self
         menu.addItem(pause)
@@ -363,12 +418,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func selectFPS(_ sender: NSMenuItem) {
         guard let fps = sender.representedObject as? Int else { return }
         currentFPS = fps
-        for overlay in overlays {
-            overlay.view.preferredFramesPerSecond = fps
-        }
+        applyPerformanceSettings()
         for mi in fpsItems {
             mi.state = (mi.representedObject as? Int) == fps ? .on : .off
         }
+    }
+
+    @objc private func selectBatterySaver(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = BatterySaverMode(rawValue: raw) else { return }
+        batterySaverMode = mode
+        UserDefaults.standard.set(raw, forKey: "batterySaverMode")
+        isOnBattery = Self.checkOnBatteryPower()
+        applyPerformanceSettings()
+        for mi in batterySaverItems {
+            mi.state = (mi.representedObject as? String) == raw ? .on : .off
+        }
+    }
+
+    private func powerSourceChanged() {
+        let onBattery = Self.checkOnBatteryPower()
+        guard onBattery != isOnBattery else { return }
+        isOnBattery = onBattery
+        applyPerformanceSettings()
+    }
+
+    private func applyPerformanceSettings() {
+        let fps = effectiveFPS
+        let multiplier = effectiveSpawnMultiplier
+        for overlay in overlays {
+            overlay.view.preferredFramesPerSecond = fps
+            overlay.scene.spawnRateMultiplier = multiplier
+        }
+    }
+
+    /// IOPSCopyPowerSourcesInfo를 사용해 현재 배터리 전원으로 동작 중인지 확인.
+    private static func checkOnBatteryPower() -> Bool {
+        guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef] else {
+            return false
+        }
+        for source in sources {
+            guard let desc = IOPSGetPowerSourceDescription(blob, source)?.takeUnretainedValue() as? [String: Any],
+                  let state = desc[kIOPSPowerSourceStateKey as String] as? String else { continue }
+            if state == (kIOPSBatteryPowerValue as String) {
+                return true
+            }
+        }
+        return false
     }
 
     @objc private func togglePause() {

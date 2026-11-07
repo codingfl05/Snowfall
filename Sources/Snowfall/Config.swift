@@ -4,9 +4,14 @@ import Foundation
 /// 모든 tuning 값은 여기에 모아둠.
 /// 눈의 "느낌"을 바꾸고 싶으면 로직 대신 이 파일의 숫자부터 바꿔볼 것.
 enum Config {
-    // MARK: - Rendering
+    // MARK: - Rendering & Energy
     static let framesPerSecond = 30                  // 기본 FPS (30 또는 60)
     static let availableFrameRates = [30, 60]
+    static let pileRedrawHz: Double = 8              // 창 하나당 눈/고드름 path 최대 재구성 빈도 (Hz)
+    static var pileRedrawInterval: TimeInterval { 1.0 / pileRedrawHz }
+    static let defaultBatterySaverMode: BatterySaverMode = .auto // 배터리 절약 기본 모드
+    static let batterySaverFPS = 24                  // 배터리 절약 활성 시 FPS
+    static let batterySaverSpawnMultiplier: Double = 0.5 // 배터리 절약 활성 시 눈 생성량 배율
 
     // MARK: - Falling flakes (내리는 눈)
     static let defaultSnowEnabled = true             // 눈 내리기 기능 기본값
@@ -30,8 +35,11 @@ enum Config {
     static let spillPerFlake: CGFloat = 0.6          // 가장자리로 흘러넘친 양이 이만큼 모이면 눈송이 하나 떨어짐
 
     // MARK: - Window tracking (창 감지)
-    static let windowPollInterval: TimeInterval = 0.05   // 20 Hz
-    static let fullscreenPollInterval: TimeInterval = 0.25 // 전체화면 상태 확인 주기 (4 Hz)
+    static let windowPollInterval: TimeInterval = 0.05   // 활성 상태(창 이동/마우스 드래그 시) 폴링 주기 (20 Hz)
+    static let idlePollHz: Double = 4                    // 유휴 상태 창 폴링 빈도 (4 Hz)
+    static var idleWindowPollInterval: TimeInterval { 1.0 / idlePollHz }
+    static let activePollHoldDuration: TimeInterval = 1.5 // 마우스 입력/창 변화 후 20 Hz 폴링을 유지하는 시간 (초)
+    static let fullscreenPollInterval: TimeInterval = 0.5 // 전체화면 상태 확인 주기 (2 Hz)
     static let moveThreshold: CGFloat = 0.5              // 이 이상 움직이면 "창이 움직였다"로 판단
     static let minWindowSize = CGSize(width: 220, height: 120) // 스테이지 매니저 썸네일 등 작은 보조 창 제외
     static let stageManagerStripWidth: CGFloat = 195     // 화면 왼쪽 스테이지 매니저 프리뷰 영역 폭 (pt)
@@ -54,7 +62,7 @@ enum Config {
     static let icicleStaggerRange: ClosedRange<TimeInterval> = 0...2.5  // 고드름마다 자라기 시작하는 시간차 (초)
 
     // MARK: - Dock & Desktop icons (Accessibility)
-    static let axPollInterval: TimeInterval = 0.25                   // Dock 아이콘 위치 갱신 주기 (4 Hz)
+    static let axPollInterval: TimeInterval = 1.0                    // Dock 아이콘 위치 갱신 주기 (1 Hz)
     static let axDesktopPollInterval: TimeInterval = 1.0             // Finder 바탕화면 아이콘 위치 갱신 주기 (1 Hz)
     static let axMessagingTimeout: Float = 0.1                       // AX IPC 응답 대기 상한 (초)
     static let minIconSize = CGSize(width: 24, height: 24)
@@ -80,6 +88,8 @@ enum Config {
 
     // MARK: - Christmas Ornaments & CPU Load (크리스마스 오나먼트 & CPU 연동 전구)
     static let defaultOrnamentsEnabled = true                        // 크리스마스 장식 표시 기본값
+    static let ornamentUpdateHz: Double = 15                         // 전구 glow/코어 밝기 갱신 빈도 (15 Hz)
+    static var ornamentUpdateInterval: TimeInterval { 1.0 / ornamentUpdateHz }
     static let cpuPollInterval: TimeInterval = 1.0                   // 시스템 CPU 사용량 측정 주기 (초)
     static let cpuSmoothingFactor: Double = 0.35                     // CPU 부하 지수 이동평균(EMA) 반영 비율
     static let cpuOverloadThreshold: Double = 0.65                   // 과부하로 판단해 반짝임 강도를 높이는 기준 (0.0~1.0)
@@ -96,8 +106,23 @@ enum Config {
     static let ornamentGlowScaleRange: ClosedRange<CGFloat> = 0.75...1.45 // 전구 빛 번짐(halo) 크기 변화 범위
 
     // MARK: - Debug
-    /// 터미널에서 `SNOW_DEBUG=1 swift run -c release` 로 실행하면 감지된 창 수 등을 출력
+    /// 터미널에서 `SNOW_DEBUG=1 ./run.sh` 로 실행하면 5초마다 프로파일링 통계를 출력
     static let debugLogging = ProcessInfo.processInfo.environment["SNOW_DEBUG"] != nil
+    static let debugLogInterval: TimeInterval = 5.0
+}
+
+enum BatterySaverMode: String, CaseIterable {
+    case off
+    case auto
+    case always
+
+    var title: String {
+        switch self {
+        case .off: return "끔"
+        case .auto: return "자동"
+        case .always: return "항상"
+        }
+    }
 }
 
 enum SnowIntensity: String, CaseIterable {

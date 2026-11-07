@@ -17,12 +17,37 @@ final class WindowTracker {
 
     private static var cachedWindowList: [[String: Any]] = []
     private static var lastSnapshotTime: TimeInterval = -999
+    private static var lastActivityTime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    private static var mouseMonitor: Any?
+
+    /// 마우스 클릭/드래그 글로벌 모니터를 등록하여 창 이동·크기 조절 가능성이 있을 때 20Hz 폴링으로 전환.
+    static func installMouseMonitorsIfNeeded() {
+        guard mouseMonitor == nil else { return }
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged]) { _ in
+            Task { @MainActor in
+                Self.noteActivity()
+            }
+        }
+    }
+
+    /// 마우스 이벤트나 창 위치/개수 변화가 감지되었을 때 호출해 activePollHoldDuration(1.5초) 동안 20Hz 폴링 유지.
+    static func noteActivity() {
+        lastActivityTime = ProcessInfo.processInfo.systemUptime
+    }
+
+    /// 평상시에는 Config.idlePollHz(4Hz), 마우스 이벤트 또는 창 변화 후 1.5초 동안은 20Hz 폴링 주기를 반환.
+    static var currentPollInterval: TimeInterval {
+        let elapsed = ProcessInfo.processInfo.systemUptime - lastActivityTime
+        return elapsed < Config.activePollHoldDuration
+            ? Config.windowPollInterval
+            : Config.idleWindowPollInterval
+    }
 
     /// 멀티 디스플레이 환경에서 폴링 주기당 CGWindowListCopyWindowInfo를 1회만 호출하여
     /// 모든 화면의 WindowTracker가 동일한 창 목록 스냅샷을 공유함.
     static func sharedWindowList(forceRefresh: Bool = false) -> [[String: Any]] {
         let now = ProcessInfo.processInfo.systemUptime
-        if forceRefresh || now - lastSnapshotTime >= Config.windowPollInterval * 0.8 {
+        if forceRefresh || now - lastSnapshotTime >= currentPollInterval * 0.8 {
             lastSnapshotTime = now
             let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
             cachedWindowList = (CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]]) ?? []

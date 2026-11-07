@@ -6,6 +6,7 @@ import AppKit
 final class SnowScene: SKScene {
     var tracker: WindowTracker?
     var intensity: SnowIntensity = .normal
+    var spawnRateMultiplier: Double = 1.0
     var isSnowEnabled: Bool = Config.defaultSnowEnabled {
         didSet {
             guard isSnowEnabled != oldValue else { return }
@@ -53,8 +54,14 @@ final class SnowScene: SKScene {
     private var lastUpdate: TimeInterval = 0
     private var clock: TimeInterval = 0
     private var pollTimer: TimeInterval = 0
+    private var ornamentTimer: TimeInterval = 0
     private var spawnCarry: Double = 0
     private var lastDebugLog: TimeInterval = 0
+    private var debugUpdateCount = 0
+    private var debugUpdateTotalMs: Double = 0
+    private var debugUpdateMaxMs: Double = 0
+    private var debugPathRebuildCount = 0
+    private var debugWindowPollCount = 0
     private var didPrefill = false
     private var snowman: Snowman?
     private var nextSnowmanTime: TimeInterval = Config.snowmanFirstDelay
@@ -73,13 +80,15 @@ final class SnowScene: SKScene {
     // MARK: - Main loop
 
     override func update(_ currentTime: TimeInterval) {
+        let updateStart = Config.debugLogging ? ProcessInfo.processInfo.systemUptime : 0
+
         // dt: 지난 frame 이후 흐른 시간. 일시정지 후 재개 시 튀지 않도록 상한을 둠.
         let dt = lastUpdate == 0 ? 1.0 / 60.0 : min(currentTime - lastUpdate, 1.0 / 20.0)
         lastUpdate = currentTime
         clock += dt
 
         pollTimer += dt
-        if pollTimer >= Config.windowPollInterval {
+        if pollTimer >= WindowTracker.currentPollInterval {
             pollTimer = 0
             refreshWindows()
         }
@@ -89,30 +98,80 @@ final class SnowScene: SKScene {
             stepFlakes(dt: dt)
         }
 
+        var shouldStepOrnaments = false
+        var ornamentPhaseDelta: Double = 0
         if isOrnamentsEnabled {
             CPUMonitor.shared.updateIfNeeded(currentTime: clock)
+            ornamentTimer += dt
+            if ornamentTimer >= Config.ornamentUpdateInterval {
+                shouldStepOrnaments = true
+                ornamentPhaseDelta = CPUMonitor.shared.currentBlinkSpeed * ornamentTimer
+                ornamentTimer = 0
+            }
         }
-        let ornamentPhaseDelta = CPUMonitor.shared.currentBlinkSpeed * dt
         let cpuOverload = CPUMonitor.shared.overloadIntensity
 
         for pile in pileOrder {
             if isSnowEnabled {
                 pile.relax()
                 emitSpill(from: pile)
-                if pile.isDirty { pile.redraw() }
+                if pile.shouldRedrawPile(dt: dt) {
+                    pile.redraw()
+                    if Config.debugLogging { debugPathRebuildCount += 1 }
+                }
 
                 pile.stepIcicles(dt: dt)
-                if pile.iciclesDirty { pile.redrawIcicles() }
+                if pile.shouldRedrawIcicles(dt: dt) {
+                    pile.redrawIcicles()
+                    if Config.debugLogging { debugPathRebuildCount += 1 }
+                }
             }
 
             if isOrnamentsEnabled {
-                if pile.ornamentsDirty { pile.redrawOrnaments() }
-                pile.stepOrnaments(phaseDelta: ornamentPhaseDelta, overload: cpuOverload)
+                if pile.ornamentsDirty {
+                    pile.redrawOrnaments()
+                    if Config.debugLogging { debugPathRebuildCount += 1 }
+                }
+                if shouldStepOrnaments {
+                    pile.stepOrnaments(phaseDelta: ornamentPhaseDelta, overload: cpuOverload)
+                }
             }
         }
 
         if isSnowEnabled {
             stepSnowman(dt: dt)
+        }
+
+        if Config.debugLogging {
+            let elapsedMs = (ProcessInfo.processInfo.systemUptime - updateStart) * 1000.0
+            debugUpdateCount += 1
+            debugUpdateTotalMs += elapsedMs
+            if elapsedMs > debugUpdateMaxMs {
+                debugUpdateMaxMs = elapsedMs
+            }
+            let logSpan = clock - lastDebugLog
+            if logSpan >= Config.debugLogInterval {
+                let avgMs = debugUpdateTotalMs / Double(max(1, debugUpdateCount))
+                let rebuildsPerSec = Double(debugPathRebuildCount) / logSpan
+                let pollsPerSec = Double(debugWindowPollCount) / logSpan
+                print(
+                    String(
+                        format: "[Snowfall] update avg: %.2f ms (max: %.2f ms), surfaces: %d, flakes: %d, path rebuilds/s: %.1f, window polls/s: %.1f",
+                        avgMs,
+                        debugUpdateMaxMs,
+                        pileOrder.count,
+                        active.count,
+                        rebuildsPerSec,
+                        pollsPerSec
+                    )
+                )
+                lastDebugLog = clock
+                debugUpdateCount = 0
+                debugUpdateTotalMs = 0
+                debugUpdateMaxMs = 0
+                debugPathRebuildCount = 0
+                debugWindowPollCount = 0
+            }
         }
     }
 
@@ -162,10 +221,12 @@ final class SnowScene: SKScene {
 
     private func refreshWindows() {
         guard let tracker else { return }
+        if Config.debugLogging { debugWindowPollCount += 1 }
         let windows = tracker.currentWindows()
         var seen = Set<CGWindowID>()
         var order: [Pile] = []
         order.reserveCapacity(windows.count)
+        var detectedWindowChange = false
 
         for w in windows {
             seen.insert(w.id)
@@ -177,12 +238,14 @@ final class SnowScene: SKScene {
                         dumpIcicles(from: pile)
                     }
                     pile.reset(frame: w.frame)
+                    detectedWindowChange = true
                 } else if pile.hasBottomMoved(to: w.frame) {
                     // 아랫변만 움직인 경우 (창 아래쪽 크기 조절) → 고드름만 부러져 떨어짐
                     if isSnowEnabled {
                         dumpIcicles(from: pile)
                     }
                     pile.updateFrame(w.frame, resetIcicles: true)
+                    detectedWindowChange = true
                 } else {
                     pile.updateFrame(w.frame, resetIcicles: false)
                 }
@@ -197,6 +260,7 @@ final class SnowScene: SKScene {
                 addChild(pile.node)
                 piles[w.id] = pile
                 order.append(pile)
+                detectedWindowChange = true
             }
         }
 
@@ -208,6 +272,11 @@ final class SnowScene: SKScene {
             }
             pile.node.removeFromParent()
             piles[id] = nil
+            detectedWindowChange = true
+        }
+
+        if detectedWindowChange {
+            WindowTracker.noteActivity()
         }
 
         // 가려짐(occlusion) 계산: 각 창은 자기보다 앞에 있는 창들에 의해 가려질 수 있음
@@ -217,11 +286,6 @@ final class SnowScene: SKScene {
             frontRects.append(pile.frame)
         }
         pileOrder = order
-
-        if Config.debugLogging && clock - lastDebugLog > 2 {
-            lastDebugLog = clock
-            print("[Snowfall] windows: \(windows.count), flakes: \(active.count)")
-        }
     }
 
     // MARK: - Flakes
@@ -258,14 +322,15 @@ final class SnowScene: SKScene {
         // 시작하자마자 화면이 비어 있지 않도록 미리 눈송이를 뿌려둠
         let avgSpeed = Config.baseFallSpeed + 2.5 * Config.fallSpeedPerRadius
         let lifetime = Double(size.height / avgSpeed)
-        let count = Int(intensity.flakesPerSecondPer1000pt * Double(size.width) / 1000 * lifetime)
+        let rate = intensity.flakesPerSecondPer1000pt * spawnRateMultiplier
+        let count = Int(rate * Double(size.width) / 1000 * lifetime)
         for _ in 0..<min(count, Config.maxFlakes / 2) {
             spawnFlake(atY: CGFloat.random(in: 0...max(1, size.height)))
         }
     }
 
     private func spawnFlakes(dt: TimeInterval) {
-        let rate = intensity.flakesPerSecondPer1000pt * Double(size.width) / 1000
+        let rate = intensity.flakesPerSecondPer1000pt * spawnRateMultiplier * Double(size.width) / 1000
         spawnCarry += rate * dt
         while spawnCarry >= 1 {
             spawnCarry -= 1
@@ -350,7 +415,13 @@ final class SnowScene: SKScene {
     /// 이번 frame에 눈송이가 어떤 창의 눈 표면을 "통과"했으면 착지 처리
     private func land(_ f: Flake, prevY: CGFloat) -> Bool {
         for pile in pileOrder {
-            guard let c = pile.column(atX: f.x), pile.visible[c] else { continue }
+            guard pile.hasVisibleColumns,
+                  prevY >= pile.base,
+                  f.y < pile.base + pile.maxSurfacePileHeight,
+                  f.x >= pile.originX,
+                  f.x <= pile.endX,
+                  let c = pile.column(atX: f.x),
+                  pile.visible[c] else { continue }
             let surface = pile.base + pile.heights[c]
             if prevY >= surface && f.y < surface {
                 pile.add(at: c, amount: f.radius * Config.accumulationPerFlake * f.mass)
