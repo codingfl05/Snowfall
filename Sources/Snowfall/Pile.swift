@@ -15,12 +15,12 @@ struct Icicle {
 /// 창 상단 테두리 가랜드에 매달린 크리스마스 오나먼트 및 전구 하나.
 @MainActor
 final class OrnamentBulb {
-    let x: CGFloat
-    let y: CGFloat
-    let anchorY: CGFloat
+    var x: CGFloat
+    var y: CGFloat
+    var anchorY: CGFloat
     let isBauble: Bool          // true면 줄에 매달린 둥근 방울 오나먼트, false면 전선에 붙은 꼬마전구
     let color: NSColor
-    var phase: Double
+    let phaseOffset: Double
     var isVisible: Bool = true
 
     let containerNode = SKNode()
@@ -34,7 +34,7 @@ final class OrnamentBulb {
         anchorY: CGFloat,
         isBauble: Bool,
         color: NSColor,
-        phase: Double,
+        phaseOffset: Double,
         baubleTexture: SKTexture,
         glowTexture: SKTexture,
         coreTexture: SKTexture
@@ -44,7 +44,7 @@ final class OrnamentBulb {
         self.anchorY = anchorY
         self.isBauble = isBauble
         self.color = color
-        self.phase = phase
+        self.phaseOffset = phaseOffset
 
         containerNode.position = CGPoint(x: x, y: y)
 
@@ -79,6 +79,28 @@ final class OrnamentBulb {
         core.zPosition = 3
         containerNode.addChild(core)
         self.coreSprite = core
+    }
+
+    func updateVisuals(globalPhase: Double, index: Int, overload: Double) {
+        let phase = globalPhase + phaseOffset
+        let primary = 0.5 + 0.5 * sin(phase)
+        let brightness: Double
+        if overload > 0 {
+            let sparkle = 0.5 + 0.5 * sin(phase * 2.2 + Double(index) * 1.3)
+            brightness = primary * (1.0 - 0.35 * overload) + sparkle * (0.35 * overload)
+        } else {
+            brightness = primary
+        }
+
+        let b = CGFloat(max(0.0, min(1.0, brightness)))
+        let minScale = Config.ornamentGlowScaleRange.lowerBound
+        let maxScale = Config.ornamentGlowScaleRange.upperBound
+        let overloadBoost = CGFloat(1.0 + 0.14 * overload)
+        let scale = (minScale + (maxScale - minScale) * b) * overloadBoost
+
+        glowSprite.alpha = 0.18 + (0.66 + CGFloat(0.14 * overload)) * b
+        glowSprite.setScale(scale)
+        coreSprite.alpha = 0.32 + 0.68 * pow(b, 1.35)
     }
 }
 
@@ -121,6 +143,7 @@ final class Pile {
     }
     private(set) var ornaments: [OrnamentBulb] = []
     private(set) var ornamentsDirty = true
+    static var globalOrnamentPhase: Double = 0
 
     let node = SKShapeNode()
     let shadowNode = SKShapeNode()
@@ -246,6 +269,7 @@ final class Pile {
     // MARK: - State
 
     func reset(frame newFrame: CGRect) {
+        let oldFrame = frame
         frame = newFrame
         let inset: CGFloat
         switch kind {
@@ -265,7 +289,24 @@ final class Pile {
         isDirty = true
         forceImmediateRedraw = true
         seedIcicles()
-        seedOrnaments()
+
+        // 창 폭은 그대로이고 위치만 이동한 경우 기존 오나먼트 노드를 재생성하지 않고 좌표만 이동 (애니메이션 끊김 방지)
+        if kind == .window,
+           ornamentsEnabled,
+           !ornaments.isEmpty,
+           abs(newFrame.width - oldFrame.width) <= Config.moveThreshold {
+            let dx = newFrame.minX - oldFrame.minX
+            let dy = newFrame.maxY - oldFrame.maxY
+            for item in ornaments {
+                item.x += dx
+                item.y += dy
+                item.anchorY += dy
+                item.containerNode.position = CGPoint(x: item.x, y: item.y)
+            }
+            ornamentsDirty = true
+        } else {
+            seedOrnaments()
+        }
     }
 
     func clear() {
@@ -329,7 +370,7 @@ final class Pile {
                 anchorY: cordTopY,
                 isBauble: isBauble,
                 color: color,
-                phase: phase,
+                phaseOffset: phase,
                 baubleTexture: Self.sharedBaubleTexture,
                 glowTexture: Self.sharedGlowTexture,
                 coreTexture: Self.sharedCoreTexture
@@ -351,7 +392,7 @@ final class Pile {
                     anchorY: swagY,
                     isBauble: false,
                     color: bulbColor,
-                    phase: bulbPhase,
+                    phaseOffset: bulbPhase,
                     baubleTexture: Self.sharedBaubleTexture,
                     glowTexture: Self.sharedGlowTexture,
                     coreTexture: Self.sharedCoreTexture
@@ -362,36 +403,15 @@ final class Pile {
             }
         }
         ornamentsDirty = true
-        stepOrnaments(phaseDelta: 0, overload: CPUMonitor.shared.overloadIntensity)
+        stepOrnaments(overload: CPUMonitor.shared.overloadIntensity)
     }
 
-    /// CPU 부하에 비례하는 phaseDelta만큼 오나먼트 전구 위상을 진행시키고 빛 번짐(glow)과 밝기를 갱신
-    func stepOrnaments(phaseDelta: Double, overload: Double) {
+    /// 현재 글로벌 위상(globalOrnamentPhase)을 기준으로 보이는 오나먼트 전구의 빛 번짐(glow)과 밝기를 갱신
+    func stepOrnaments(overload: Double) {
         guard !ornaments.isEmpty else { return }
-        let minScale = Config.ornamentGlowScaleRange.lowerBound
-        let maxScale = Config.ornamentGlowScaleRange.upperBound
-
-        for (i, item) in ornaments.enumerated() {
-            item.phase += phaseDelta
-            guard item.isVisible else { continue }
-
-            // 기본 사인파 숨쉬기 + CPU 과부하 시 고주파 반짝임(sparkle) 파형 합성
-            let primary = 0.5 + 0.5 * sin(item.phase)
-            let brightness: Double
-            if overload > 0 {
-                let sparkle = 0.5 + 0.5 * sin(item.phase * 2.8 + Double(i) * 1.3)
-                brightness = primary * (1.0 - 0.42 * overload) + sparkle * (0.42 * overload)
-            } else {
-                brightness = primary
-            }
-
-            let b = CGFloat(max(0.0, min(1.0, brightness)))
-            let overloadBoost = CGFloat(1.0 + 0.22 * overload)
-            let scale = (minScale + (maxScale - minScale) * b) * overloadBoost
-
-            item.glowSprite.alpha = 0.16 + (0.68 + CGFloat(0.15 * overload)) * b
-            item.glowSprite.setScale(scale)
-            item.coreSprite.alpha = 0.30 + 0.70 * pow(b, 1.35)
+        let globalPhase = Self.globalOrnamentPhase
+        for (i, item) in ornaments.enumerated() where item.isVisible {
+            item.updateVisuals(globalPhase: globalPhase, index: i, overload: overload)
         }
     }
 
@@ -570,17 +590,28 @@ final class Pile {
         }
 
         if !ornaments.isEmpty {
-            let topBandMinY = frame.maxY - Config.ornamentBaubleDrop - 8
+            let topBandMinY = frame.maxY - Config.ornamentBaubleDrop - 12
             let topRelevant = occluders.filter {
-                $0.minY <= frame.maxY && $0.maxY >= topBandMinY && $0.maxX > frame.minX && $0.minX < frame.maxX
+                $0.minY <= frame.maxY + 2 && $0.maxY >= topBandMinY && $0.maxX > frame.minX && $0.minX < frame.maxX
             }
             var ornamentChanged = false
-            for item in ornaments {
-                let v = !topRelevant.contains {
-                    item.x >= $0.minX && item.x <= $0.maxX && item.y >= $0.minY && item.anchorY <= $0.maxY
-                }
+            let overload = CPUMonitor.shared.overloadIntensity
+            let globalPhase = Self.globalOrnamentPhase
+            for (idx, item) in ornaments.enumerated() {
+                let r = item.isBauble ? Config.ornamentBaubleRadius : Config.ornamentBulbRadius
+                let itemRect = CGRect(
+                    x: item.x - r,
+                    y: item.y - r,
+                    width: r * 2,
+                    height: (item.anchorY - item.y) + r + 2
+                )
+                let v = !topRelevant.contains { $0.intersects(itemRect) }
                 if v != item.isVisible {
                     item.isVisible = v
+                    if v {
+                        // 창이 앞으로 나와 조명이 켜지는 순간 이전 프레임의 굳은 크기가 보이지 않도록 즉시 현재 위상 반영
+                        item.updateVisuals(globalPhase: globalPhase, index: idx, overload: overload)
+                    }
                     item.containerNode.isHidden = !v
                     ornamentChanged = true
                 }

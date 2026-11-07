@@ -103,7 +103,7 @@ enum Config {
     static let ornamentBaubleDrop: CGFloat = 13.0                    // 매달린 방울 오나먼트 줄 길이 (pt)
     static let ornamentBulbRadius: CGFloat = 3.2                     // 꼬마전구 반지름 (pt)
     static let ornamentBaubleRadius: CGFloat = 5.4                   // 방울 오나먼트 반지름 (pt)
-    static let ornamentGlowScaleRange: ClosedRange<CGFloat> = 0.75...1.45 // 전구 빛 번짐(halo) 크기 변화 범위
+    static let ornamentGlowScaleRange: ClosedRange<CGFloat> = 0.90...1.14 // 전구 빛 번짐(halo) 크기 변화 범위
 
     // MARK: - Debug
     /// 터미널에서 `SNOW_DEBUG=1 ./run.sh` 로 실행하면 5초마다 프로파일링 통계를 출력

@@ -20,12 +20,16 @@ final class WindowTracker {
     private static var lastActivityTime: TimeInterval = ProcessInfo.processInfo.systemUptime
     private static var mouseMonitor: Any?
 
-    /// 마우스 클릭/드래그 글로벌 모니터를 등록하여 창 이동·크기 조절 가능성이 있을 때 20Hz 폴링으로 전환.
-    static func installMouseMonitorsIfNeeded() {
+    /// 마우스 클릭/드래그 글로벌 모니터를 등록하여 창 전환·이동·크기 조절 시 즉시 감지 및 20Hz 폴링 전환.
+    static func installMouseMonitorsIfNeeded(onMouseClick: (@MainActor () -> Void)? = nil) {
         guard mouseMonitor == nil else { return }
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged]) { _ in
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .leftMouseDragged]) { event in
+            let isClick = (event.type == .leftMouseDown || event.type == .leftMouseUp)
             Task { @MainActor in
                 Self.noteActivity()
+                if isClick {
+                    onMouseClick?()
+                }
             }
         }
     }

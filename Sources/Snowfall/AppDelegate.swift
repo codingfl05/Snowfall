@@ -92,7 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func setupObservers() {
-        WindowTracker.installMouseMonitorsIfNeeded()
+        WindowTracker.installMouseMonitorsIfNeeded { [weak self] in
+            self?.handleWindowSwitchActivity()
+        }
 
         NotificationCenter.default.addObserver(
             self,
@@ -483,7 +485,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func frontmostContextChanged() {
-        refreshFullscreenStates(forceSnapshot: true)
+        handleWindowSwitchActivity()
+    }
+
+    /// 앱 전환(Cmd+Tab), 스페이스 전환, 마우스 클릭 시 폴링 주기를 기다리지 않고
+    /// 즉시 창 순서 및 상단 크리스마스 조명을 갱신함.
+    private func handleWindowSwitchActivity() {
+        WindowTracker.noteActivity()
+        refreshFullscreenAndWindowsImmediately()
+        // 마우스 클릭 직후 WindowServer의 창 z-order가 반영되는 시점을 한 번 더 즉시 캐치
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            self?.refreshFullscreenAndWindowsImmediately()
+        }
+    }
+
+    private func refreshFullscreenAndWindowsImmediately() {
+        guard !isGloballyPaused, !overlays.isEmpty else { return }
+        let windowList = WindowTracker.sharedWindowList(forceRefresh: true)
+        var changed = false
+        for i in overlays.indices {
+            let fullscreen = overlays[i].tracker.isFrontmostAppFullscreen(in: windowList)
+            if overlays[i].isFullscreenPaused != fullscreen {
+                overlays[i].isFullscreenPaused = fullscreen
+                changed = true
+            }
+            if !fullscreen {
+                overlays[i].scene.refreshWindowsImmediately(with: windowList)
+            }
+        }
+        if changed {
+            updatePauseState()
+        }
     }
 
     @objc private func screensDidSleep() {

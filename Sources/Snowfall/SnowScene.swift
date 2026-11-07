@@ -99,13 +99,12 @@ final class SnowScene: SKScene {
         }
 
         var shouldStepOrnaments = false
-        var ornamentPhaseDelta: Double = 0
         if isOrnamentsEnabled {
             CPUMonitor.shared.updateIfNeeded(currentTime: clock)
+            Pile.globalOrnamentPhase += CPUMonitor.shared.currentBlinkSpeed * dt
             ornamentTimer += dt
             if ornamentTimer >= Config.ornamentUpdateInterval {
                 shouldStepOrnaments = true
-                ornamentPhaseDelta = CPUMonitor.shared.currentBlinkSpeed * ornamentTimer
                 ornamentTimer = 0
             }
         }
@@ -133,7 +132,7 @@ final class SnowScene: SKScene {
                     if Config.debugLogging { debugPathRebuildCount += 1 }
                 }
                 if shouldStepOrnaments {
-                    pile.stepOrnaments(phaseDelta: ornamentPhaseDelta, overload: cpuOverload)
+                    pile.stepOrnaments(overload: cpuOverload)
                 }
             }
         }
@@ -219,10 +218,16 @@ final class SnowScene: SKScene {
 
     // MARK: - Windows
 
-    private func refreshWindows() {
+    /// 창 전환(앱 활성화, 마우스 클릭 등) 시 폴링 주기를 기다리지 않고 즉시 창 목록과 조명을 갱신
+    func refreshWindowsImmediately(with windowList: [[String: Any]]? = nil) {
+        pollTimer = 0
+        refreshWindows(windowList: windowList)
+    }
+
+    private func refreshWindows(windowList: [[String: Any]]? = nil) {
         guard let tracker else { return }
         if Config.debugLogging { debugWindowPollCount += 1 }
-        let windows = tracker.currentWindows()
+        let windows = tracker.currentWindows(from: windowList)
         var seen = Set<CGWindowID>()
         var order: [Pile] = []
         order.reserveCapacity(windows.count)
@@ -275,14 +280,40 @@ final class SnowScene: SKScene {
             detectedWindowChange = true
         }
 
+        // 창의 앞뒤 순서(z-order)만 바뀐 경우(창 전환)도 변화로 감지
+        if !detectedWindowChange {
+            if order.count != pileOrder.count {
+                detectedWindowChange = true
+            } else {
+                for (a, b) in zip(order, pileOrder) where a.windowID != b.windowID {
+                    detectedWindowChange = true
+                    break
+                }
+            }
+        }
+
         if detectedWindowChange {
             WindowTracker.noteActivity()
         }
 
-        // 가려짐(occlusion) 계산: 각 창은 자기보다 앞에 있는 창들에 의해 가려질 수 있음
+        // 가려짐(occlusion) 계산 및 가려짐 변화 시 지연 없이 즉시 다시 그리기
         var frontRects: [CGRect] = []
         for pile in order {
             pile.updateVisibility(occluders: frontRects)
+            if isOrnamentsEnabled && pile.ornamentsDirty {
+                pile.redrawOrnaments()
+                if Config.debugLogging { debugPathRebuildCount += 1 }
+            }
+            if isSnowEnabled {
+                if pile.isDirty && pile.forceImmediateRedraw {
+                    pile.redraw()
+                    if Config.debugLogging { debugPathRebuildCount += 1 }
+                }
+                if pile.iciclesDirty && pile.forceImmediateIcicleRedraw {
+                    pile.redrawIcicles()
+                    if Config.debugLogging { debugPathRebuildCount += 1 }
+                }
+            }
             frontRects.append(pile.frame)
         }
         pileOrder = order
