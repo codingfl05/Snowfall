@@ -104,6 +104,11 @@ enum Config {
     static let ornamentBulbRadius: CGFloat = 3.2                     // 꼬마전구 반지름 (pt)
     static let ornamentBaubleRadius: CGFloat = 5.4                   // 방울 오나먼트 반지름 (pt)
     static let ornamentGlowScaleRange: ClosedRange<CGFloat> = 0.90...1.14 // 전구 빛 번짐(halo) 크기 변화 범위
+    static let overloadPowderMaxRatePer1000pt: Double = 95           // CPU 100% 과부하 시 화면 폭 1000pt당 초당 노란 가루 생성 수
+    static let overloadPowderRadiusRange: ClosedRange<CGFloat> = 0.8...2.1 // 과부하 노란 가루 입자 반지름 범위 (고운 가루 느낌)
+    static let overloadPowderFallSpeedRange: ClosedRange<CGFloat> = 32...68 // 노란 가루 낙하 속도 범위 (pt/s)
+    static let overloadPowderSwayFrequencyRange: ClosedRange<CGFloat> = 2.0...4.2 // 노란 가루 좌우 반짝 흔들림 빈도 (rad/s)
+    static let overloadPowderAlphaRange: ClosedRange<CGFloat> = 0.65...0.98 // 노란 가루 투명도 범위
 
     // MARK: - Debug
     /// 터미널에서 `SNOW_DEBUG=1 ./run.sh` 로 실행하면 5초마다 프로파일링 통계를 출력

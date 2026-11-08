@@ -16,6 +16,8 @@ final class Flake {
     var phase: CGFloat = 0
     var mass: CGFloat = 1                // 쌓일 때 양 배율
     var landDelay: TimeInterval = 0      // 0보다 크면 아직 착지 불가
+    var isOverloadPowder: Bool = false   // CPU 과부하 시 내리는 노란 가루 입자 여부
+    var baseAlpha: CGFloat = 1           // 기본 투명도 (노란 가루 반짝임 계산용)
 
     init(texture: SKTexture) {
         node = SKSpriteNode(texture: texture)

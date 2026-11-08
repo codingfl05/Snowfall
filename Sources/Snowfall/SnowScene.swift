@@ -19,7 +19,7 @@ final class SnowScene: SKScene {
                     nextSnowmanTime = clock + 2.0
                 }
             } else {
-                recycleAllFlakes()
+                recycleSnowFlakesOnly()
                 removeSnowmanImmediately()
                 for pile in piles.values {
                     pile.clear()
@@ -56,6 +56,7 @@ final class SnowScene: SKScene {
     private var pollTimer: TimeInterval = 0
     private var ornamentTimer: TimeInterval = 0
     private var spawnCarry: Double = 0
+    private var powderCarry: Double = 0
     private var lastDebugLog: TimeInterval = 0
     private var debugUpdateCount = 0
     private var debugUpdateTotalMs: Double = 0
@@ -93,14 +94,21 @@ final class SnowScene: SKScene {
             refreshWindows()
         }
 
+        CPUMonitor.shared.updateIfNeeded(currentTime: clock)
+        let cpuOverload = CPUMonitor.shared.overloadIntensity
+
         if isSnowEnabled {
             spawnFlakes(dt: dt)
+        }
+        if cpuOverload > 0 {
+            spawnOverloadPowder(dt: dt, overload: cpuOverload)
+        }
+        if isSnowEnabled || !active.isEmpty {
             stepFlakes(dt: dt)
         }
 
         var shouldStepOrnaments = false
         if isOrnamentsEnabled {
-            CPUMonitor.shared.updateIfNeeded(currentTime: clock)
             Pile.globalOrnamentPhase += CPUMonitor.shared.currentBlinkSpeed * dt
             ornamentTimer += dt
             if ornamentTimer >= Config.ornamentUpdateInterval {
@@ -108,7 +116,6 @@ final class SnowScene: SKScene {
                 ornamentTimer = 0
             }
         }
-        let cpuOverload = CPUMonitor.shared.overloadIntensity
 
         for pile in pileOrder {
             if isSnowEnabled {
@@ -349,6 +356,17 @@ final class SnowScene: SKScene {
         active.removeAll()
     }
 
+    private func recycleSnowFlakesOnly() {
+        var i = 0
+        while i < active.count {
+            if !active[i].isOverloadPowder {
+                recycle(at: i)
+            } else {
+                i += 1
+            }
+        }
+    }
+
     private func prefillSky() {
         // 시작하자마자 화면이 비어 있지 않도록 미리 눈송이를 뿌려둠
         let avgSpeed = Config.baseFallSpeed + 2.5 * Config.fallSpeedPerRadius
@@ -369,11 +387,47 @@ final class SnowScene: SKScene {
         }
     }
 
+    /// CPU 과부하 시 과부하 강도에 비례해 반짝이는 노란색 가루 입자를 생성
+    private func spawnOverloadPowder(dt: TimeInterval, overload: Double) {
+        let rate = Config.overloadPowderMaxRatePer1000pt * overload * spawnRateMultiplier * Double(size.width) / 1000
+        powderCarry += rate * dt
+        while powderCarry >= 1 {
+            powderCarry -= 1
+            guard let f = obtainFlake() else { break }
+            let r = CGFloat.random(in: Config.overloadPowderRadiusRange)
+            f.isOverloadPowder = true
+            f.setRadius(r)
+            f.x = CGFloat.random(in: -30...(size.width + 10))
+            f.y = size.height + r * 2 + CGFloat.random(in: 0...18)
+            f.terminalSpeed = CGFloat.random(in: Config.overloadPowderFallSpeedRange)
+            f.vy = -f.terminalSpeed
+            f.vx = CGFloat.random(in: -10...10)
+            f.acceleration = 5
+            f.swayScale = CGFloat.random(in: 0.75...1.35)
+            f.swayFrequency = CGFloat.random(in: Config.overloadPowderSwayFrequencyRange)
+            f.phase = CGFloat.random(in: 0...(2 * .pi))
+            f.mass = 0
+            f.landDelay = 0
+            f.baseAlpha = CGFloat.random(in: Config.overloadPowderAlphaRange)
+            f.node.alpha = f.baseAlpha
+            f.node.color = NSColor(
+                calibratedRed: 1.0,
+                green: CGFloat.random(in: 0.80...0.95),
+                blue: CGFloat.random(in: 0.14...0.36),
+                alpha: 1.0
+            )
+            f.node.colorBlendFactor = 0.92
+            f.node.blendMode = .add
+            f.node.position = CGPoint(x: f.x, y: f.y)
+        }
+    }
+
     private func spawnFlake(atY y: CGFloat?) {
         guard let f = obtainFlake() else { return }
         let r = CGFloat.random(in: Config.flakeRadiusRange)
         let depthSpan = max(0.1, Config.flakeRadiusRange.upperBound - Config.flakeRadiusRange.lowerBound)
         let depth = (r - Config.flakeRadiusRange.lowerBound) / depthSpan
+        f.isOverloadPowder = false
         f.setRadius(r)
         f.x = CGFloat.random(in: -30...(size.width + 10))
         f.y = y ?? (size.height + r * 2 + CGFloat.random(in: 0...20))
@@ -389,13 +443,18 @@ final class SnowScene: SKScene {
         // 작은 눈송이는 멀리 있는 것처럼 은은하게, 큰 눈송이는 선명하게 표현 (원근감)
         let minA = Config.flakeAlphaRange.lowerBound
         let maxA = Config.flakeAlphaRange.upperBound
-        f.node.alpha = min(maxA, max(minA, minA + (maxA - minA) * (0.25 + 0.75 * depth) + CGFloat.random(in: -0.08...0.08)))
+        let alpha = min(maxA, max(minA, minA + (maxA - minA) * (0.25 + 0.75 * depth) + CGFloat.random(in: -0.08...0.08)))
+        f.baseAlpha = alpha
+        f.node.alpha = alpha
+        f.node.colorBlendFactor = 0
+        f.node.blendMode = .alpha
         f.node.position = CGPoint(x: f.x, y: f.y)
     }
 
     /// 창에서 떨어지는 눈 덩어리 (중력처럼 점점 빨라짐)
     private func spawnDebris(x: CGFloat, y: CGFloat, vx: CGFloat, vy: CGFloat) {
         guard let f = obtainFlake() else { return }
+        f.isOverloadPowder = false
         f.setRadius(CGFloat.random(in: 1.6...3.2))
         f.x = x
         f.y = y
@@ -408,7 +467,10 @@ final class SnowScene: SKScene {
         f.phase = CGFloat.random(in: 0...(2 * .pi))
         f.mass = Config.debrisMass
         f.landDelay = Config.debrisLandDelay
+        f.baseAlpha = 1
         f.node.alpha = 1
+        f.node.colorBlendFactor = 0
+        f.node.blendMode = .alpha
         f.node.position = CGPoint(x: x, y: y)
     }
 
@@ -437,6 +499,11 @@ final class SnowScene: SKScene {
             if remove {
                 recycle(at: i)   // swap-remove: i 자리에 다른 눈송이가 들어오므로 i는 그대로
             } else {
+                if f.isOverloadPowder {
+                    // 노란 가루는 떨어지면서 반짝이는 효과를 줌
+                    let twinkle = 0.72 + 0.28 * sin(t * f.swayFrequency * 2.4 + f.phase)
+                    f.node.alpha = f.baseAlpha * twinkle
+                }
                 f.node.position = CGPoint(x: f.x, y: f.y)
                 i += 1
             }
@@ -455,7 +522,9 @@ final class SnowScene: SKScene {
                   pile.visible[c] else { continue }
             let surface = pile.base + pile.heights[c]
             if prevY >= surface && f.y < surface {
-                pile.add(at: c, amount: f.radius * Config.accumulationPerFlake * f.mass)
+                if !f.isOverloadPowder && isSnowEnabled {
+                    pile.add(at: c, amount: f.radius * Config.accumulationPerFlake * f.mass)
+                }
                 return true
             }
         }
